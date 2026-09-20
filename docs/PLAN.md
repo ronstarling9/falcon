@@ -159,14 +159,62 @@ purchase for this entire project.
 enough for MegaDetector to fire a "something is there" event, but not for
 species ID. The classifier sidecar therefore pulls the **full-resolution
 snapshot** for stage 2. This is a second, independent reason the sidecar
-architecture (§6) beats a Frigate detector plugin.
+architecture (§7) beats a Frigate detector plugin.
 
 **Sun.** Park St runs roughly north–south, so the backyard faces east or west
 and will take low sun in frame once a day. Mount so cameras look north where
 the geometry allows; otherwise put the camera on the sun side shooting away
 from it. Confirm which side of the street resolves this.
 
-## 6. Architecture
+## 6. Compute topology — the Mac is not the server
+
+The available GPU is a MacBook Pro (36-core Apple Silicon GPU). That is a lot
+of compute, but it is the wrong shape for half of this system, and the
+mismatch is worth stating plainly because it invalidates "run the whole stack
+in Compose on the GPU box."
+
+**Why a laptop can't be the always-on half:**
+
+- It sleeps when the lid closes, and it leaves the house. M1's entire
+  deliverable is *14+ days of uninterrupted logging*.
+- **Docker on macOS runs in a Linux VM with no access to the Apple GPU.**
+  Containers cannot reach Metal. There is also no VAAPI/NVDEC for video
+  decode, and VideoToolbox isn't exposed to the VM — so a containerized
+  Frigate on this machine gets neither accelerated inference nor accelerated
+  decode. Frigate does not meaningfully support macOS.
+
+**So split it:**
+
+| | Always-on box | MacBook Pro |
+|---|---|---|
+| Runs | Frigate, classifier sidecar, brain, effectors | labeler, training, evaluation |
+| Needs | 24/7 uptime, cheap, edge accelerator | big GPU, unified memory |
+| Cost | ~$120–250 | owned |
+
+**Always-on box options**, cheapest first: a used mini PC (Dell OptiPlex
+Micro, Lenovo ThinkCentre Tiny — ~$100–150 and plenty for 2–3 streams) with a
+Coral TPU; or a Raspberry Pi 5 with the AI HAT+ (Hailo-8L, 13 TOPS), which is
+a clean fit for Frigate. Either way, sizing the inference for an edge
+accelerator is the constraint: MegaDetector quantized, plus a small
+fine-tuned classifier (EfficientNet-B0 or MobileNetV3) at int8. Both fit.
+
+A cheap trick that cuts the always-on compute requirement substantially: most
+Reolink/Dahua cameras do person/vehicle/**animal** classification onboard. Use
+that as the motion gate and the box only ever sees frames that already have an
+animal in them.
+
+**The Mac's actual job is the better one.** Fine-tuning the species classifier
+on a few thousand crops is exactly what a large unified-memory Apple GPU is
+good at — MLX or PyTorch MPS, both pleasant. MegaDetector is PyTorch and runs
+on MPS; the SpeciesNet bootstrap pass is offline, so CPU fallback is fine if
+its ops don't map cleanly.
+
+**Zero-spend start.** Develop the entire pipeline natively on the Mac right
+now against recorded RTSP or a video file — no Docker, no hardware. Buy the
+always-on box only when you're ready to run continuously. That defers all
+spend past the point where you know the pipeline works.
+
+## 7. Architecture
 
 ```
   PoE cam ─┐
@@ -193,9 +241,10 @@ config, and the model can be swapped or A/B'd freely.
 never-target list, quiet hours, and the audit log. Every effector action is a
 row.
 
-The whole thing runs in Docker Compose on the GPU box.
+The always-on half runs in Docker Compose on the small box (§6), not on
+the Mac.
 
-## 7. The detection pipeline
+## 8. The detection pipeline
 
 Stage 1 — **is there an animal.** MegaDetector (Pytorch-Wildlife) is built for
 exactly this: camera-trap imagery, three classes (animal / person / vehicle),
@@ -214,6 +263,27 @@ an open-vocabulary detector (YOLO-World or OWLv2, prompted with
 `["squirrel","chipmunk","groundhog","rabbit","deer","cat","dog","bird","human"]`),
 then human-verify in a minimal web UI. Verifying a few hundred crops is one
 evening. This is what makes the system yours rather than generic.
+
+### Detection window — daylight only
+
+Night operation is **out of scope**. Gate the whole pipeline on a solar
+schedule (civil dawn → civil dusk; in Montclair that swings from ~05:20–20:45
+in June to ~07:00–17:00 in December). This is a real simplification, not just
+a deferral:
+
+- No IR illuminators, no low-light camera premium, no separate night training
+  set — IR imagery is a different domain and would roughly double the
+  labeling work.
+- Roughly half the events disappear, and with them the worst false-positive
+  source (IR-lit insects and spiderwebs at the lens, which dominate nighttime
+  motion events on every outdoor camera).
+- It fits the target list exactly: squirrels, chipmunks, and groundhogs are
+  all diurnal.
+
+**Known gap to accept consciously:** raccoons and opossums are nocturnal, deer
+are crepuscular. If damage appears overnight, the M1 baseline will be blind to
+the cause and cannot explain it. Dawn/dusk edges also still mean low sun and
+long shadows, so wide dynamic range on the cameras still matters.
 
 Optional slow path: a VLM on the snapshot as an out-of-band second opinion for
 low-confidence events. Not in the latency path — used to catch systematic
@@ -245,7 +315,7 @@ the drone lands:
 ground-plane assumption). It is unused in M1 and essential the moment an
 effector needs to aim.
 
-## 8. Milestones
+## 9. Milestones
 
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
@@ -288,7 +358,7 @@ Randomized approach vectors, variable delays, audio profile rotation.
 Measure raid frequency over 30-day windows against M1's baseline. This is the
 only way to know whether any of it worked.
 
-## 9. Repo layout (proposed)
+## 10. Repo layout (proposed)
 
 ```
 falcon/
@@ -306,7 +376,7 @@ falcon/
 └─ deploy/         compose.yaml, .env.example
 ```
 
-## 10. Hardware (M1 only)
+## 11. Hardware (M1 only)
 
 - 2–3 PoE cameras with RTSP and a usable sub-stream (Reolink 810A/811A,
   Amcrest, or any Dahua OEM). **Buy for lens, not megapixels** — per §5, a
@@ -315,17 +385,19 @@ falcon/
   tuning. Wide dynamic range matters more than resolution — midday sun plus
   bed shadow is the hard case.
 - PoE switch/injector, outdoor-rated cable runs.
-- The GPU box you already have.
-- Total: roughly $200–400.
+- An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
+- No IR illuminators — daylight only (§8).
+- The MacBook, for training only. No spend.
+- Total: roughly $320–650, and none of it needed to start (§6).
 
 No drone spend until M3, and none at all until the software flies in SITL.
 
-## 11. Open questions
+## 12. Open questions
 
 Site-specific ones are in §4.3. Still open and affecting the build: the
-never-target list (pets, bird feeder, neighbors' cats), whether night
-operation is needed, language/deploy preferences for the non-CV services, and
+never-target list (pets, bird feeder, neighbors' cats), language/deploy
+preferences for the non-CV services, and
 the time budget.
 
-Resolved: tap-to-launch posture (§3), ground-effector-first (§8), GPU box
-available, M1 scope (§8).
+Resolved: tap-to-launch posture (§3), ground-effector-first (§9), M1 scope
+(§9), daylight-only (§8), compute topology (§6).
