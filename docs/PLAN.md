@@ -116,11 +116,13 @@ has to change.
 
 ### 4.3 Open site questions
 
-House depth front-to-back; detached garage/driveway present; which side of Park
-St (determines whether the backyard faces east or west, and therefore which
-time of day the sun is in frame); mature tree canopy (affects sightlines, IR
-illumination, and GPS multipath); available eave mounting points and whether
-PoE can be run to them.
+House depth front-to-back; detached garage/driveway present; mature tree canopy (affects sightlines and dappled-shade
+false positives); mounting points at the **west end** of the lot — fence
+posts, a garage, a shed — since that is where the cameras now go (§5.1); and
+the cable route for the run in §5.2.
+
+Resolved: house is on the west side of Park St, front door east, so the
+backyard faces west.
 
 ## 5. Camera planning — the math that drives everything
 
@@ -161,10 +163,52 @@ species ID. The classifier sidecar therefore pulls the **full-resolution
 snapshot** for stage 2. This is a second, independent reason the sidecar
 architecture (§7) beats a Frigate detector plugin.
 
-**Sun.** Park St runs roughly north–south, so the backyard faces east or west
-and will take low sun in frame once a day. Mount so cameras look north where
-the geometry allows; otherwise put the camera on the sun side shooting away
-from it. Confirm which side of the street resolves this.
+### 5.1 Siting — the sun and the neighbors agree
+
+The house is on the **west** side of Park St with the front door facing east,
+so **the backyard faces west**. At 40.83° N the sun sets at azimuth ~302°
+(WNW) in June, 270° in September, ~238° (WSW) in December — all of it down
+the length of the yard.
+
+**Do not mount the cameras on the back of the house.** A camera on the west
+wall looking west into the yard takes the low afternoon sun straight down its
+optical axis, from roughly 15:00 to sunset — which is peak foraging time. Lens
+flare, blown highlights, and useless WDR exactly when you need the frames.
+
+**Mount at the west (far) end of the lot, looking east back toward the
+house.** Then the afternoon sun is behind the camera and the animals are
+front-lit: the best-lit configuration available on this lot. Morning sun is in
+that direction, but a west-facing yard sits in the house's own shadow until
+the sun clears the roofline — roughly 19° elevation for a 30 ft house seen
+from 85 ft away.
+
+**The general rule that solves the rest: keep the sky out of the frame.**
+Mount at 10–12 ft and tilt down far enough that the horizon sits at or above
+the top of frame. At ~20° downtilt with a 40° vertical FOV, nothing above the
+horizon is in shot, so the sun is excluded at both ends of the day regardless
+of azimuth — and the camera stops metering against a bright sky, which is what
+was destroying dynamic range in the first place. This costs nothing; it is
+purely a mounting decision.
+
+**The same siting is also the privacy-correct one.** Cameras at the back fence
+aimed east look at *your own house*. A camera on the house aimed west would be
+pointed directly into the rear neighbor's property. Same mount, best light,
+least intrusion — take it.
+
+### 5.2 Consequence: the beds are far from the house, so power and network go
+to them
+
+A west-facing yard is shaded by its own house for the first 30–40 ft each
+morning, so full-sun vegetable beds are almost certainly in the **rear half**,
+40–85 ft out. Per §5 the pixel budget allows a ~25 ft standoff at 4 MP —
+nowhere near 85 ft. So the cameras live out at the beds, and that means a
+real cable run.
+
+Topology: **one** PoE run (60–90 ft, direct-burial CAT6 in conduit, or along
+the fence line in UV-rated conduit) out to a small outdoor-rated PoE switch at
+the yard end, then short jumpers to each camera. One trench, one conduit, one
+switch — not three parallel runs from the house. This is the largest piece of
+physical work in M1; everything else is software.
 
 ## 6. Compute topology — the Mac is not the server
 
@@ -384,7 +428,8 @@ falcon/
   Varifocal is worth the premium here since you will re-aim these while
   tuning. Wide dynamic range matters more than resolution — midday sun plus
   bed shadow is the hard case.
-- PoE switch/injector, outdoor-rated cable runs.
+- PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
+  end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2).
 - An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
 - No IR illuminators — daylight only (§8).
 - The MacBook, for training only. No spend.
