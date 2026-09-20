@@ -585,12 +585,8 @@ falcon/
 
 ## 12. Hardware (M1 only)
 
-- 2–3 PoE cameras with RTSP and a usable sub-stream (Reolink 810A/811A,
-  Amcrest, or any Dahua OEM). **Buy for lens, not megapixels** — per §5, a
-  4–8 mm lens matched to your standoff distance, never the bundled 2.8 mm.
-  Varifocal is worth the premium here since you will re-aim these while
-  tuning. Wide dynamic range matters more than resolution — midday sun plus
-  bed shadow is the hard case.
+- 2–3 PoE cameras with RTSP and a usable sub-stream — see the shortlist in
+  §12.2. **Buy for lens, not megapixels** (§5), and start with one.
 - PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
   end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2)
   — unless there is already power at a rear garage/shed, in which case the
@@ -650,6 +646,52 @@ against.
 Note: without a Nest Aware subscription, wired cameras retain roughly 3 hours
 of event history, so collect the same day or subscribe for a month while
 building the dataset.
+
+### 12.2 Camera shortlist
+
+Three buying rules first, because they eliminate most of the catalog:
+
+**1. Motorized varifocal is worth the premium.** You do not yet know the final
+mounting points, the bed positions, or the standoff distances, and §5 shows
+the framing has to be tight. A manual varifocal means a ladder, a refocus, and
+re-sealing the housing every time you adjust — so you won't adjust, and you
+will live with bad framing forever. Zoom and focus from a browser is the
+difference between iterating and settling.
+
+**2. Ignore the entire night-vision spec sheet.** Daylight-only (§8) makes IR
+range, color night vision, starlight sensitivity, and f/1.0 apertures
+irrelevant — and that is most of what camera marketing sells. Put the money
+into lens range and sensor size instead.
+
+**3. Insist on true/native WDR, not "DWDR."** Digital WDR is tone mapping and
+does nothing for a west-facing yard with long shadows and dappled tree shade
+(§5.1). A physically larger sensor (1/1.8" rather than 1/2.7") does more for
+real dynamic range than any WDR number on the box.
+
+For Frigate specifically, stream reliability ranks **Dahua/EmpireTech >
+Amcrest > Reolink**. Dahua substreams are configurable and stable, which
+matters directly: Frigate runs detection on the substream.
+
+| Option | Spec | ~Price | Why / why not |
+|---|---|---|---|
+| **EmpireTech (Dahua) IPC-T5442T-ZE** — *first choice* | 4 MP, 1/1.8" sensor, 2.7–12 mm motorized varifocal, IP67 | $105–135 | Big sensor, full motorized zoom+focus, the clean Dahua substream. Its zoom range spans ~106° to ~33° HFOV, which covers standoffs from ~10 ft out past 40 ft at ≥100 px/ft — the whole range §5 needs, adjustable from a browser. |
+| Dahua IPC-HFW2831T-ZAS-S2 | 8 MP, 1/1.8", 3.7–11 mm motorized varifocal, true WDR, IP67 | $170–190 | More pixels, narrower zoom ratio. Worth it if a bed ends up further out than expected. |
+| Amcrest IP8M-2496EB | 4 K fixed, 103° FOV, IP67 | $110–125 | Dahua OEM. Reported stable on RTSP for weeks. Too wide for species ID — good as the context camera below. |
+| Reolink RLC-810A | 4 K fixed 4 mm, IP66, onboard animal detection | $80–90 | Budget pick, and the known-good exception in a Reolink 4K line that otherwise has Frigate substream problems. 8 MP offsets the wide lens: ~100 px/ft at 20 ft. Onboard animal detection is a useful free motion gate. Fixed lens means you must get the mount right first time. |
+| Axis M-series | pro-grade optics and WDR | $400–700 | Genuinely excellent and genuinely unnecessary here. |
+
+**Fleet composition: two tight species cameras plus one wide context camera.**
+The wide one cannot do species ID — too few px/ft — but it shows *approach
+corridors*: which fence line, which tree, whose yard they come from. That maps
+directly onto where deterrents go in M2, and it costs $80.
+
+**Buy one camera first.** Mount it, run it a week, and check the px/ft and
+framing assumptions in §5 against reality before buying the other two. The
+alternative is owning three of the wrong camera.
+
+Prices and model availability drift; verify current listings before ordering.
+EmpireTech is the US-market Dahua channel, and how you get genuine Dahua
+firmware stateside.
 
 ## 13. Open questions
 
