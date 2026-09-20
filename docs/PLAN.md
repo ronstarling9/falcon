@@ -296,7 +296,7 @@ on MPS; the SpeciesNet bootstrap pass is offline, so CPU fallback is fine if
 its ops don't map cleanly.
 
 **Zero-spend start.** Develop the entire pipeline natively on the Mac right
-now against recorded RTSP or a video file — no Docker, no hardware. Buy the
+now against clips from the Nest Cam already on hand (§12.1) or any video file — no Docker, no hardware. Buy the
 always-on box only when you're ready to run continuously. That defers all
 spend past the point where you know the pipeline works.
 
@@ -523,7 +523,8 @@ costs a week and zero dollars. Do not skip it.
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
 stored with crop + clip, push notification with snapshot, labeler UI, first
 fine-tune, and staged capture sessions for the protected classes (§9.6).
-**No actuators at all.**
+**No actuators at all.** Bootstrap the dataset offline from the existing Nest
+Cam (§12.1) before buying anything.
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,
@@ -600,6 +601,55 @@ falcon/
 - Total: roughly $320–650, and none of it needed to start (§6).
 
 No drone spend until M3, and none at all until the software flies in SITL.
+
+### 12.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
+
+**Not usable in the built system**, for two independent reasons.
+
+*It's indoor-rated.* No IP rating, and a 10 ft captive USB cable to a 7.5 W
+adapter. It cannot be mounted at the beds.
+
+*It's roughly 5× short on pixel density.* 1080p (1920 px) across a 135°
+diagonal FOV works out to ~129° horizontal, so the scene width is ~4.2× the
+standoff distance and pixels-per-foot is ~456/d:
+
+| Target | px/ft needed (§5) | Max standoff on this camera |
+|---|---|---|
+| Chipmunk | ~100 | **4.6 ft** |
+| Squirrel | ~50 | 9.1 ft |
+| Groundhog | ~25 | 18 ft |
+
+For comparison, the planned 4 MP + 6 mm combination hits 100 px/ft at 25 ft.
+A very wide lens on a 2 MP sensor is precisely the purchase §5 warns against —
+which is no criticism of the camera, it was built to watch a living room.
+
+*The stream story is also bad.* This generation exposes **no RTSP**. Live
+video comes over WebRTC through the Smart Device Management API (Device Access
+registration is a one-time US$5, plus OAuth, a GCP project, and Pub/Sub for
+events), with sessions that must be periodically extended. The practical route
+is Home Assistant's Nest integration re-exposed via go2rtc as RTSP for Frigate.
+That works, but it is fragile, and it puts a Google cloud round-trip inside a
+pipeline designed to run locally with a sub-second budget.
+
+**What it is genuinely good for: starting this week, for free.**
+
+The key realization is that **M1's real work needs recorded clips, not a live
+stream.** Validating that MegaDetector → species classification separates
+squirrel from chipmunk on your footage, and fine-tuning on your backgrounds,
+are both offline batch jobs on the Mac. So skip the SDM and go2rtc work
+entirely — pull clips out of the app and run the pipeline against files.
+
+Siting for that: under a covered porch or eave, or a rear garage overhang if
+one has power, within 10 ft of an outlet. Aim it at **one** close bed at 5–9 ft
+rather than trying to cover the yard — at that range it has enough pixels on a
+squirrel to be a real test. From the house it necessarily looks west into the
+afternoon sun (§5.1), so keep the sky out of frame and expect the late-day
+frames to be poor; that is itself a useful preview of what §5.1 is protecting
+against.
+
+Note: without a Nest Aware subscription, wired cameras retain roughly 3 hours
+of event history, so collect the same day or subscribe for a month while
+building the dataset.
 
 ## 13. Open questions
 
