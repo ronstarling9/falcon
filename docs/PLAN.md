@@ -349,6 +349,8 @@ the drone lands:
   "bbox": [0.31, 0.44, 0.09, 0.14],
   "world": { "bearing_deg": 118.0, "range_m": 6.2 },
   "track_id": "t-9931",
+  "protected": { "person": 0.00, "dog": 0.01, "cat": 0.11, "bird": 0.03 },
+  "decision": { "engage": false, "reason": "veto:cat" },
   "dwell_s": 4.2,
   "snapshot_uri": "file:///var/falcon/snap/…jpg",
   "clip_uri": "file:///var/falcon/clip/…mp4"
@@ -359,12 +361,127 @@ the drone lands:
 ground-plane assumption). It is unused in M1 and essential the moment an
 effector needs to aim.
 
-## 9. Milestones
+## 9. Engagement policy — the never-target list drives the design
+
+Protected: **dogs, cats, children, birds.**
+
+### 9.1 Protected classes are a veto, not a competing label
+
+The instinct is to let the classifier pick a winner and engage if it says
+"squirrel." That is wrong here, because the error costs are wildly asymmetric:
+missing one squirrel costs nothing, soaking a child is unacceptable. So
+detection of a target and detection of a protected class run as **two
+independent tests with different thresholds**, and the protected test is a
+veto that wins regardless of margin.
+
+Concretely: `squirrel 0.82, cat 0.11` must **not** engage. A cat at 0.11 is
+far too much cat. Veto thresholds belong down around 0.02–0.10 while the
+engage threshold sits at 0.80.
+
+### 9.2 "Children" means person — never build a child classifier
+
+Detect **person** and veto on any person at all, at any age. Don't try to
+distinguish child from adult: it's harder, less reliable, and pointless, since
+you don't want to spray adults either. MegaDetector's person class already has
+very high recall, which is exactly the property a veto needs.
+
+This is both the safer design and the simpler one.
+
+### 9.3 Birds are the hard case, and they create a real tension
+
+Birds are the single largest false-positive source on any outdoor garden
+camera — constant, small, fast motion. Putting them on the veto list is
+fail-safe in the right direction (a bird detection suppresses rather than
+triggers). But a naive trailing-window veto on birds means the system
+**never fires**, because in a Montclair backyard in July there is essentially
+always a bird within a few seconds of the frame.
+
+So birds get different veto semantics from mammals: **spatial only, no
+trailing window.** Veto if a bird is near the aim point right now; don't hold
+the veto after it leaves.
+
+Worth stating consciously: birds *do* eat gardens. Excluding them is a
+preference, not an oversight — it just means the system will never address
+that share of the damage, and the M1 baseline should track bird activity
+separately so you can see how large that share is.
+
+### 9.4 The decision function
+
+Engagement requires **positive evidence and absence of veto evidence and
+freshness**. Any missing input means no engagement — a failed classifier, a
+stale frame, or an unreachable protected-class check all fail closed.
+
+```
+engage(frame) iff ALL:
+  fresh     now - frame.ts < 1.0 s
+  positive  max P(species in TARGETS) >= 0.80
+  stable    same species across >= 3 consecutive frames within 0.75 s
+  clear     for each p in PROTECTED: P(p) < veto_threshold[p]
+            AND no PROTECTED sighting within trailing_window[p]
+  policy    cooldown elapsed, inside daylight window, effector armed
+else        log the decision with its reason, do not engage
+```
+
+| Protected class | Veto threshold | Trailing window |
+|---|---|---|
+| person | 0.02 | 120 s |
+| dog | 0.05 | 60 s |
+| cat | 0.05 | 60 s |
+| bird | 0.10 | none — spatial only (§9.3) |
+
+Trailing windows exist because cameras have blind spots: a dog that left frame
+two seconds ago is still in the yard.
+
+The `stable` requirement costs ~0.5 s of latency and eliminates most
+single-frame errors. That's an easy trade for a water jet; revisit only if a
+faster effector ever justifies it.
+
+Start with **frame-level** vetoes (protected class anywhere in frame). Move to
+spatial vetoes (protected class within the effector's hazard cone around the
+aim point) only once tracking is trustworthy.
+
+### 9.5 The specific technical risk: cat ↔ squirrel
+
+COCO-trained detectors routinely label squirrels as `cat`. One direction of
+that confusion is harmless — a squirrel read as a cat just suppresses. The
+**other direction soaks a cat**, so it is the number that matters:
+
+> Named exit criterion for M2: **P(predicted ∈ TARGETS | actual = cat) ≈ 0**,
+> measured on a held-out set with cats deliberately over-represented.
+
+Overall accuracy is not the metric. This conditional is.
+
+### 9.6 You will have to farm negatives deliberately
+
+The self-collected dataset will be badly imbalanced exactly where it matters.
+Your cameras will capture thousands of birds, a handful of cats, and almost no
+dogs or children — the protected classes are rarest precisely where errors are
+most expensive.
+
+So stage the capture: walk the kids and the dog through the garden on camera
+for a few sessions, from varied distances and angles, at different times of
+day. A few hundred frames each. Supplement cats with public imagery, but the
+staged on-camera frames matter more because they match your exact lighting,
+background, and geometry.
+
+This is a real M1 task, not an afterthought.
+
+### 9.7 Shadow mode before live fire
+
+M2's policy runs for a week in **dry-run**: evaluate every decision, log
+"would have engaged" with the snapshot that triggered it, actuate nothing.
+Then review every would-have-fired event by hand.
+
+This is how you find the cat-read-as-squirrel *before* it hits a cat, and it
+costs a week and zero dollars. Do not skip it.
+
+## 10. Milestones
 
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
 stored with crop + clip, push notification with snapshot, labeler UI, first
-fine-tune. **No actuators at all.**
+fine-tune, and staged capture sessions for the protected classes (§9.6).
+**No actuators at all.**
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,
@@ -384,6 +501,9 @@ A pan/tilt water jet (2 servos + solenoid, aimed from `world.bearing_deg`) is
 the highest effect-per-dollar actuator in the whole project and worth
 considering before the drone.
 
+Exit criteria: one week of shadow mode reviewed by hand (§9.7), and
+P(predicted ∈ TARGETS | actual = cat) ≈ 0 on a cat-heavy held-out set (§9.5).
+
 ### M3 — Drone, tap-to-launch
 Notification gains a **Launch** action → `POST /sortie` → scripted flight →
 FPV stream to phone → auto-RTL. Hard geofence, battery floor, abort button,
@@ -402,7 +522,7 @@ Randomized approach vectors, variable delays, audio profile rotation.
 Measure raid frequency over 30-day windows against M1's baseline. This is the
 only way to know whether any of it worked.
 
-## 10. Repo layout (proposed)
+## 11. Repo layout (proposed)
 
 ```
 falcon/
@@ -420,7 +540,7 @@ falcon/
 └─ deploy/         compose.yaml, .env.example
 ```
 
-## 11. Hardware (M1 only)
+## 12. Hardware (M1 only)
 
 - 2–3 PoE cameras with RTSP and a usable sub-stream (Reolink 810A/811A,
   Amcrest, or any Dahua OEM). **Buy for lens, not megapixels** — per §5, a
@@ -437,12 +557,12 @@ falcon/
 
 No drone spend until M3, and none at all until the software flies in SITL.
 
-## 12. Open questions
+## 13. Open questions
 
 Site-specific ones are in §4.3. Still open and affecting the build: the
-never-target list (pets, bird feeder, neighbors' cats), language/deploy
-preferences for the non-CV services, and
+language/deploy preferences for the non-CV services, and
 the time budget.
 
-Resolved: tap-to-launch posture (§3), ground-effector-first (§9), M1 scope
-(§9), daylight-only (§8), compute topology (§6).
+Resolved: tap-to-launch posture (§3), ground-effector-first (§10), M1 scope
+(§10), daylight-only (§8), compute topology (§6),
+never-target list (§9).
