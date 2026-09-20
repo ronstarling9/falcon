@@ -117,7 +117,9 @@ has to change.
 ### 4.3 Open site questions
 
 House depth front-to-back; detached garage/driveway present; mature tree canopy (affects sightlines and dappled-shade
-false positives); mounting points at the **west end** of the lot — fence
+false positives); **whether a rear garage or shed has power** — the single fact that decides
+whether §5.2 needs a trench at all; mounting points at the **west end** of the
+lot — fence
 posts, a garage, a shed — since that is where the cameras now go (§5.1); and
 the cable route for the run in §5.2.
 
@@ -195,20 +197,60 @@ aimed east look at *your own house*. A camera on the house aimed west would be
 pointed directly into the rear neighbor's property. Same mount, best light,
 least intrusion — take it.
 
-### 5.2 Consequence: the beds are far from the house, so power and network go
-to them
+### 5.2 Getting power and data to the beds
 
 A west-facing yard is shaded by its own house for the first 30–40 ft each
 morning, so full-sun vegetable beds are almost certainly in the **rear half**,
 40–85 ft out. Per §5 the pixel budget allows a ~25 ft standoff at 4 MP —
-nowhere near 85 ft. So the cameras live out at the beds, and that means a
-real cable run.
+nowhere near 85 ft. So the cameras live out at the beds.
 
-Topology: **one** PoE run (60–90 ft, direct-burial CAT6 in conduit, or along
-the fence line in UV-rated conduit) out to a small outdoor-rated PoE switch at
-the yard end, then short jumpers to each camera. One trench, one conduit, one
-switch — not three parallel runs from the house. This is the largest piece of
-physical work in M1; everything else is software.
+**Backyard WiFi is available, but it solves data, not power** — and power is
+the binding constraint.
+
+*Why battery and solar cameras don't rescue this.* Battery cameras (Argus,
+Wyze and similar) are architecturally incompatible with this design: they
+sleep, wake on PIR, take 1–3 s to start streaming, and expose no continuous
+RTSP. This system needs a continuous sub-stream for motion gating and a
+sub-second decision budget. Solar doesn't close the gap either — a camera
+streaming continuously draws ~5–8 W, and even restricted to the daylight
+window (§8) that's ~70–140 Wh/day, against maybe 40–60 Wh/day from a small
+panel in a partly-treed NJ yard in December. Off by several times in the
+season that matters least, workable only in midsummer, and by the time you've
+bought panel plus battery plus charge controller you've spent more than the
+trench.
+
+So mains power has to reach the yard end regardless, which means digging.
+
+**And once you're digging, PoE is the easy thing to put in the hole.** Running
+120 V out there is the harder job: direct-burial UF-B or conduit at code
+depth, GFCI protection, probably an electrician and possibly a permit. A
+single direct-burial CAT6 is low-voltage, needs none of that, and carries
+power *and* data in one run. **PoE isn't the expensive option here — it's the
+cheap one.**
+
+Topology: one 60–90 ft direct-burial CAT6 in conduit out to a small
+outdoor-rated PoE switch at the yard end, then short jumpers to each camera.
+One trench, one conduit, one switch.
+
+*Even with power solved, PoE still wins on the link itself.* Three cameras
+running main plus sub streams is ~15–20 Mbps sustained, 24/7. WiFi carries
+that in good conditions — but this is a 75 ft lot in dense suburbia, through
+an exterior wall, across 60–90 ft, with summer leaf-out attenuating both bands
+and every neighbor's AP competing for airtime. Frigate is unforgiving of
+stream instability (decode errors, fragmented recordings), and retransmit
+jitter eats the latency budget. Dropouts will correlate with exactly the
+frames you care about.
+
+**The one fact that changes this:** if there's a detached garage or shed at
+the rear with existing power — plausible for an 1889 Upper Montclair house
+with a driveway — then power is already solved, WiFi becomes reasonable, and
+the trench disappears. This is the open item in §4.3 worth answering first.
+
+**Don't let any of this block M1.** A WiFi camera on an outdoor extension cord
+to a rear GFCI outlet is a perfectly good throwaway prototype, and a temporary
+fence-line run is a normal way to do a growing-season-only deployment. Get
+data flowing, validate that the models separate squirrel from chipmunk on
+*your* footage, and trench later once the system has earned it.
 
 ## 6. Compute topology — the Mac is not the server
 
@@ -549,7 +591,9 @@ falcon/
   tuning. Wide dynamic range matters more than resolution — midday sun plus
   bed shadow is the hard case.
 - PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
-  end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2).
+  end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2)
+  — unless there is already power at a rear garage/shed, in which case the
+  existing backyard WiFi is adequate and this line drops out.
 - An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
 - No IR illuminators — daylight only (§8).
 - The MacBook, for training only. No spend.
@@ -565,4 +609,4 @@ the time budget.
 
 Resolved: tap-to-launch posture (§3), ground-effector-first (§10), M1 scope
 (§10), daylight-only (§8), compute topology (§6),
-never-target list (§9).
+never-target list (§9), backyard WiFi present (§5.2).
