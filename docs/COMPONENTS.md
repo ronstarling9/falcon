@@ -90,7 +90,7 @@ valve de-energised, jet off. Configure the relay so the un-powered state is
 **Does** — Hosts every continuous part of the system. Deliberately separate
 from the MacBook, which sleeps and travels (PLAN.md §6).
 **Built on** — Used mini PC (OptiPlex Micro / ThinkCentre Tiny) or Pi 5,
-Debian 13, Docker Compose. 500 GB SSD is sufficient under the §11 retention
+Debian 13, Docker Compose. 500 GB SSD is sufficient under the §12 retention
 policy.
 **Fails by** — Everything stops. No detection, no logging, no notifications.
 Mitigation is boring and effective: Compose `restart: unless-stopped`, and a
@@ -116,7 +116,7 @@ publishes events to MQTT.
 **Consumes** — RTSP from cameras. **Produces** — `frigate/events` on MQTT,
 clips and snapshots on disk, HTTP API on 5000.
 **Key config** — Continuous retention at 0–1 days; event retention ~10 days
-(§11.2, §11.6). Detect stream sized per §5.
+(§12.2, §12.6). Detect stream sized per §5.
 **Fails by** — No events reach anything downstream, and the pipeline goes
 silent rather than wrong. Config is the real hazard: 0.17 shipped breaking
 changes with partial auto-migration, so read release notes before bumping.
@@ -155,9 +155,15 @@ provenance hashes are in the event record (§7).
 thresholds, protected-class vetoes, trailing windows, cooldowns, daylight
 gating, shadow mode. Writes the audit trail. Serves the HTTP API, including
 `POST /sortie` for tap-to-launch. Copies pinned media out of Frigate's
-lifecycle (§11.6).
+lifecycle (§12.6). Owns **target designation** (§10): image ray → site model
+or stereo → `world.position_m` with an uncertainty, and the launch gate that
+aborts on an ambiguous one.
 **Built on** — Python, FastAPI, Pydantic (the event contract in §7 is Pydantic
-models — one source of truth), paho-mqtt.
+models — one source of truth), paho-mqtt, OpenCV (calibration and projection
+only), NumPy.
+**Site truth** — `services/brain/site/`: per-camera intrinsics and extrinsics,
+the 2.5D surface polygons, obstacle heights, and the `site-enu` origin
+monument. Versioned, not configured.
 **Consumes** — `falcon/detections`. **Produces** — `falcon/actions`, rows in
 `falcon.db`, files in `media/pinned/`.
 **Fails by** — No decisions and no notifications. **This is the component that
@@ -179,7 +185,7 @@ firing when it shouldn't, which is why the veto lives in `brain`, upstream.
 
 ### `falcon-janitor`
 
-**Does** — Enforces the §11 retention tiers over Falcon's own directories:
+**Does** — Enforces the §12 retention tiers over Falcon's own directories:
 expires clips at 7 days, snapshots at 30, contact sheets at a year; never
 touches pinned events; writes the daily gzipped NDJSON export.
 **Built on** — Python, APScheduler or a systemd timer.
@@ -221,7 +227,7 @@ specifically to avoid a JS build for one internal page.
 **Does** — Fine-tunes the species classifier and evaluates it, notably
 `P(predicted ∈ TARGETS | actual = cat)` (§9.5), then exports ONNX for
 deployment.
-**Built on** — PyTorch MPS or MLX on the M4 Max. Note §10.4: don't run a
+**Built on** — PyTorch MPS or MLX on the M4 Max. Note §11.4: don't run a
 training job and a local VLM concurrently — 36 GB is shared.
 **Fails by** — No consequence to the running system.
 
@@ -240,7 +246,14 @@ deciding, so nothing is lost but timeliness.
 
 **Does** — The aerial effector and the simulator it is developed against.
 **Built on** — ArduPilot, MAVSDK-Python, Gazebo.
-**Status** — Gated on the New Jersey wildlife rule (§4.2), not on cost. The
+**Guidance** — §10. Flies to a *standoff* waypoint sized by the cue's
+uncertainty, then acquires and servos on its own camera; it never navigates to
+the animal directly. Altitude from a downward rangefinder, position preferably
+from optical flow rather than GPS at this lot size, obstacles by
+climb–cruise–descend against the site model plus forward proximity set to
+*stop*.
+**Status** — Gated on the New Jersey wildlife rule (§4.2), not on cost, and
+on the §10.7 canopy measurement. The
 entire sortie state machine, geofence, and abort paths are testable in SITL
 with no hardware, so this work is possible regardless of how the legal question
 resolves.

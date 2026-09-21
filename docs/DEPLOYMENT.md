@@ -40,11 +40,11 @@ Jersey wildlife question in [PLAN.md §4.2](PLAN.md).
 | `falcon-classifier` | container | MegaDetector v6 → species model. Sidecar, not a Frigate plugin (see below). |
 | `falcon-brain` | container | Engagement policy (§9), audit log, HTTP API. |
 | `falcon-effectors` | container | notify / sprinkler / audio / drone behind one interface. |
-| `falcon-janitor` | container | Enforces the retention tiers (PLAN.md §11) over Falcon's own media directories. |
+| `falcon-janitor` | container | Enforces the retention tiers (PLAN.md §12) over Falcon's own media directories. |
 | `ntfy` | container | Self-hosted push with action buttons. |
 | `falcon.db` | artifact | SQLite in WAL mode: events, decisions, audit trail. |
-| `media/` | artifact | Crops, contact sheets, snapshots, clips — tiered retention (PLAN.md §11.3). |
-| `media/pinned/` | artifact | Copied out of Frigate's managed storage on pin; never auto-deleted (§11.5–11.6). |
+| `media/` | artifact | Crops, contact sheets, snapshots, clips — tiered retention (PLAN.md §12.3). |
+| `media/pinned/` | artifact | Copied out of Frigate's managed storage on pin; never auto-deleted (§12.5–12.6). |
 
 ### Off-LAN
 
@@ -70,7 +70,7 @@ Jersey wildlife question in [PLAN.md §4.2](PLAN.md).
 | `falcon-classifier` | Edge accelerator | USB / PCIe | MegaDetector + species model |
 | `falcon-brain` | `mosquitto` | MQTT 1883 | sub `falcon/detections`, pub `falcon/actions` |
 | `falcon-brain` | `falcon.db` | SQLite | Events, decisions, audit |
-| `falcon-brain` | `media/pinned/` | file I/O | Copies pinned media out of Frigate's lifecycle (§11.6) |
+| `falcon-brain` | `media/pinned/` | file I/O | Copies pinned media out of Frigate's lifecycle (§12.6) |
 | `falcon-janitor` | `media/`, `falcon.db` | file I/O, SQLite | Expires tiers; skips pinned events |
 | `falcon-effectors` | `mosquitto` | MQTT 1883 | sub `falcon/actions` |
 | `falcon-effectors` | ESP32 | MQTT 1883 or ESPHome native API 6053 | Valve/servo commands |

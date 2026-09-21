@@ -116,8 +116,10 @@ has to change.
 
 ### 4.3 Open site questions
 
-House depth front-to-back; detached garage/driveway present; mature tree canopy (affects sightlines and dappled-shade
-false positives); **whether a rear garage or shed has power** — the single fact that decides
+House depth front-to-back; detached garage/driveway present; **mature tree
+canopy** — it affects sightlines and dappled-shade false positives, and §10.7
+makes it the fact that decides whether a clear drone transit altitude exists
+at all; **whether a rear garage or shed has power** — the single fact that decides
 whether §5.2 needs a trench at all; mounting points at the **west end** of the
 lot — fence
 posts, a garage, a shed — since that is where the cameras now go (§5.1); and
@@ -297,7 +299,7 @@ on MPS; the SpeciesNet bootstrap pass is offline, so CPU fallback is fine if
 its ops don't map cleanly.
 
 **Zero-spend start.** Develop the entire pipeline natively on the Mac right
-now against clips from the Nest Cam already on hand (§14.1) or any video file — no Docker, no hardware. Buy the
+now against clips from the Nest Cam already on hand (§15.1) or any video file — no Docker, no hardware. Buy the
 always-on box only when you're ready to run continuously. That defers all
 spend past the point where you know the pipeline works.
 
@@ -313,7 +315,7 @@ spend past the point where you know the pipeline works.
                                        │            │
                                        └──► event store (SQLite + media on disk)
                                                     ▲
-                                              janitor (§11 tiers)
+                                              janitor (§12 tiers)
                                                     │
                                               labeler UI → training set → fine-tune
 ```
@@ -399,7 +401,7 @@ The loop:
    you are never labelling from scratch.
 3. **Verify** — confirm/correct in the labeler. The only expensive step, and
    it's an evening or three.
-4. **Dedup** — by embedding (§10.3). 3,000 near-identical crops are not 3,000
+4. **Dedup** — by embedding (§11.3). 3,000 near-identical crops are not 3,000
    examples.
 5. **Split** — see the traps below.
 6. **Train the head** — minutes to an hour on the M4 Max.
@@ -456,7 +458,7 @@ long shadows, so wide dynamic range on the cameras still matters.
 
 Optional slow path: a VLM on the snapshot as an out-of-band second opinion for
 low-confidence events. Not in the latency path — used to catch systematic
-errors and to prioritize what to label next. Expanded in §10.
+errors and to prioritize what to label next. Expanded in §11.
 
 ### Event contract
 
@@ -484,7 +486,17 @@ the drone lands:
 
   "zones": [{ "name": "tomatoes", "enter": 1.10, "exit": 3.90 }],
   "track": [[0.31,0.44,0.09,0.14], [0.33,0.44,0.09,0.14], "…50 points @5Hz"],
-  "world": { "bearing_deg": 118.0, "range_m": 6.2 },
+  "world": {
+    "frame": "site-enu",
+    "position_m": { "x": 7.42, "y": -3.10, "z": 1.22 },
+    "sigma_m":    { "horizontal": 0.28, "vertical": 0.35 },
+    "method": "stereo",
+    "surface": "fence_rail",
+    "surface_ambiguous": true,
+    "truncated": false,
+    "bearing_deg": 118.0,
+    "range_m": 6.2
+  },
 
   "context": { "sun_elev_deg": 31.2, "sun_az_deg": 244.0, "solar_phase": "pm" },
 
@@ -507,12 +519,17 @@ the drone lands:
 }
 ```
 
-`track` is the field that earns the short clip retention (§11.4): the full
+`track` is the field that earns the short clip retention (§12.4): the full
 bbox path at detection rate is ~1 KB and reconstructs speed, entry edge, and
 approach vector without any video. `models` records provenance so a later
-re-analysis knows which model version produced which label. `world` is
-populated by a per-camera homography (one calibration per camera, ground-plane
-assumption) — unused in M1, essential the moment an effector needs to aim.
+re-analysis knows which model version produced which label.
+
+`world` is the field that turns a detection into something an effector can
+aim at, and it carries its own uncertainty on purpose: a ground-plane
+homography is exact for an animal on the lawn and wrong by 10–15 ft for one on
+a fence rail or a deck. `method`, `sigma_m` and `surface_ambiguous` are what
+the launch gate actually reads — see **§10**, which is the whole story. Unused
+in M1; load-bearing from M2 onward.
 
 ## 9. Engagement policy — the never-target list drives the design
 
@@ -628,7 +645,267 @@ Then review every would-have-fired event by hand.
 This is how you find the cat-read-as-squirrel *before* it hits a cat, and it
 costs a week and zero dollars. Do not skip it.
 
-## 10. Where an LLM fits — and where it must not
+## 10. Target designation and flight guidance
+
+The camera gives you a pixel. The flight controller wants a position.
+Everything in this section lives between those two sentences.
+
+### 10.1 The projection problem — and why §7's homography is not enough
+
+A detection is a box in image space, `(u, v, w, h)`. Every pixel defines a
+**ray** out of the camera's optical center, and the animal is somewhere along
+it. Which point along it is exactly the depth that was destroyed when the
+scene was projected onto the sensor. You get it back only by adding an
+assumption or another measurement.
+
+The cheap assumption is the ground plane. Calibrate once: lay 4+ markers on
+the lawn, measure their positions with a tape, click their pixel coordinates,
+solve a 3×3 homography with `cv2.findHomography`. Then take the
+**bottom-center of the bounding box** — the contact point where feet meet
+ground — and `[x y w]ᵀ = H · [u v 1]ᵀ`. With a 10–12 ft mount and honest
+calibration that is good to roughly ±0.3 m at 8 m, degrading with range
+because the viewing angle flattens: far out, one pixel of vertical error
+sweeps a lot of ground.
+
+**Fence post, deck, lawn chair — those break it, and the error is not
+small.** Homography assumes z = 0. For a camera at height `H` and an animal
+standing at true height `h`, true horizontal distance `d`, the ray continues
+past the animal and strikes the ground at
+
+```
+d' = d · H / (H − h)
+```
+
+With a 12 ft camera:
+
+| Where it actually is | h | d | Homography says | Error |
+|---|---|---|---|---|
+| Lawn, driveway | 0 ft | 25 ft | 25.0 ft | — |
+| Raised bed edge | 1 ft | 25 ft | 27.3 ft | 2.3 ft |
+| Lawn chair back | 3 ft | 15 ft | 20.0 ft | 5.0 ft |
+| Deck surface | 3.5 ft | 25 ft | 35.3 ft | **10.3 ft** |
+| Fence rail | 4 ft | 25 ft | 37.5 ft | **12.5 ft** |
+| Deck rail | 3.5 ft | 35 ft | 49.4 ft | **14.4 ft** |
+
+The drone doesn't miss by a little. It flies to a point ten to fifteen feet
+*past* the animal, which on a 75 ft lot can be over the neighbor's fence.
+
+So: **one homography is fine for a pan/tilt water jet aiming at ground beds
+(§13/M2), and disqualifying for a drone.** §7 now says so.
+
+### 10.2 Fix 1 — a 2.5D site model instead of a single plane
+
+Don't assume one plane; enumerate them. This yard has six to ten surfaces an
+animal can stand on, and they are all flat quads:
+
+| Surface | Height | Note |
+|---|---|---|
+| lawn | 0.00 m | the default |
+| driveway | 0.00 m | may be graded — measure, don't assume |
+| raised bed edge | 0.30 m | |
+| deck | 1.07 m | |
+| fence rail | 1.22 m | a *line*, not an area — worst ambiguity |
+| deck rail | 1.98 m | narrow, and the favorite perch |
+| garage roof | ~3 m | never a target, but it's the approach route |
+
+Targeting becomes a raycast instead of a matrix multiply: build the ray from
+the pixel, intersect it with every surface, keep the **nearest hit in front of
+the camera**. That is the surface the animal is standing on, because anything
+behind it is occluded by definition.
+
+This is about thirty lines of code, and it is the Frigate zone concept you
+already have (§7 `zones`) extended by exactly one number — give a zone a
+height and it becomes a surface. Keep the polygons in a local metric frame,
+versioned under `services/brain/site/`: this is site truth, not config.
+
+Two honest limits, and both push toward fix 2. **The lawn chair moves** — so
+do the wheelbarrow, the hose reel, and the bag of mulch. And a ray that grazes
+a fence rail is numerically nasty: two pixels of error flips you between "on
+the rail at 8 m" and "on the lawn at 14 m."
+
+### 10.3 Fix 2 — two cameras, and the depth comes back
+
+§5 already puts two species cameras on the lot. When both see the animal at
+the same instant you need no surface assumption at all: intersect the two rays
+and you have a true 3D point. This is the robust answer, and the hardware cost
+is zero because the hardware is already in the plan.
+
+What it does cost:
+
+- **Extrinsic calibration** — the rigid transform between the cameras. Image a
+  set of shared markers with known positions and solve `cv2.solvePnP` per
+  camera against the same world frame. Redo it whenever a camera is bumped,
+  and treat a bump as an incident rather than a shrug.
+- **Time sync.** The rays must come from *simultaneous* frames. A squirrel at
+  1.5 m/s with 150 ms of inter-camera skew is 22 cm of error before you start.
+  Run NTP on both cameras, use RTSP presentation timestamps, and only fuse
+  detections whose timestamps agree to <50 ms. Reject the pair otherwise.
+- **Overlap.** Stereo only exists inside the intersection of the two frusta.
+  Aim the overlap deliberately at the beds and the deck — where the surface
+  ambiguity is worst — and accept monocular fallback elsewhere.
+
+Two rays never actually meet, so take the midpoint of their mutual
+perpendicular and use that segment's length as a free quality signal: if the
+rays pass more than ~0.5 m apart, you have probably fused two different
+animals. Drop it.
+
+### 10.4 Therefore a position is a distribution, not a point
+
+All of the above argues for the same change to the event contract. `world`
+stops being two scalars and starts carrying its own provenance and
+uncertainty:
+
+```json
+"world": {
+  "frame": "site-enu",
+  "position_m": { "x": 7.42, "y": -3.10, "z": 1.22 },
+  "sigma_m":    { "horizontal": 0.28, "vertical": 0.35 },
+  "method": "stereo",
+  "surface": "fence_rail",
+  "surface_ambiguous": true,
+  "bearing_deg": 118.0,
+  "range_m": 6.2
+}
+```
+
+`method` ∈ `stereo | surface | ground_plane | unknown`. The launch gate reads
+`method` and `sigma_m` — **not** `position_m`. That is the whole safety
+argument in one line: `surface_ambiguous`, or σ above threshold, is an
+**abort**, not a guess. A confidently wrong position is far more dangerous
+than an admittedly unknown one.
+
+And define the frame first. `site-enu` is a local East-North-Up metric frame
+whose origin is a physical, findable monument — a bolt in the dock pad. Every
+camera calibration, every site polygon, and the drone's home position resolve
+into that one frame. Write it down in `docs/adr/` before any calibration work,
+or you will spend a weekend reconciling three coordinate conventions that are
+each individually correct.
+
+### 10.5 Getting the drone there — don't navigate to the animal
+
+Here is the reframe that makes the whole problem tractable. **The drone does
+not need to know where the squirrel is. It needs to get close enough that its
+own camera can see it, and then close the loop itself.**
+
+That changes the accuracy requirement from "±0.3 m" to "put the target inside
+the drone's field of view" — at a 10 m standoff with a 70° FOV, a ±4 m box.
+Every method above clears that easily, *including plain homography on the
+lawn*. Structure the sortie as a handoff:
+
+1. **Cue** — fixed cameras emit `world.position_m` ± σ.
+2. **Transit** — fly to a **standoff** waypoint: offset horizontally and
+   *above* the target, chosen so the ambiguity cone — σ, plus the surface
+   ambiguity, plus however far the animal has moved since the cue — fits
+   inside the drone's FOV.
+3. **Acquire** — the drone's own detector finds the animal in its own frames.
+4. **Servo** — approach on the drone's own bearing. This needs no site model,
+   no homography, and no GPS.
+5. **Abort** — no acquisition within N seconds → RTL. Treat this as the
+   *expected* outcome, not a failure.
+
+This is why the fixed cameras never have to be good at ranging, and why
+arguing about ±20 cm is the wrong argument to have.
+
+### 10.6 What the flight controller actually navigates in
+
+ArduPilot and PX4 navigate in GPS/NED, so `site-enu` has to be georeferenced:
+survey the origin once, store lat/lon/alt, convert waypoints to offsets. But
+look at what that asks of GPS in a 23 × 26 m yard hemmed in by a house and
+trees — consumer GPS with multipath off a wall is 2–5 m, the same order as the
+entire target area. In rough order of sanity:
+
+- **Don't use GPS for guidance at all.** Optical flow plus a downward
+  rangefinder dead-reckons very well over 25 m and is genuinely more accurate
+  than GPS at this scale.
+- **Fiducials.** A few AprilTag/ArUco markers on the fence and the dock give
+  absolute drift correction, and the dock tag doubles as ArduPilot precision
+  landing. This is a printed sheet of paper.
+- **RTK.** Centimeter-grade, ~$300–600 for base + rover, and the most moving
+  parts. Almost certainly overkill here — noted so it can be dismissed
+  deliberately.
+
+The non-obvious consequence: on a lot this small, the flight controller's
+default (trust GPS) is the *least* accurate option available. Don't let a
+default make that call.
+
+### 10.7 The obstacle question — four problems wearing one name
+
+"Something between the dock and the critter" is four different failure modes
+with four different fixes.
+
+**(a) Known static obstacles** — house, garage, fence, pergola, clothesline, a
+mature maple. These go into the same site model as the surfaces (§10.2), with
+heights. The fix is geometric rather than algorithmic: **climb–cruise–
+descend.** Take off vertically to a transit altitude above everything, fly
+horizontally, descend over the target. Delivery and survey aircraft do this
+because vertical clearance is enormously cheaper than 3D path planning — one
+number replaces a planner.
+
+That works *if a clear transit altitude exists*. A 6 ft fence and a 9 ft deck
+umbrella are both cleared at 20 ft. **Tree canopy is what decides it, and it
+is the §4.3 question this section makes load-bearing.** A mature maple
+overhanging the yard means no single clear altitude exists, and you are into
+real 3D planning (ArduPilot BendyRuler or Dijkstra against a proximity map)
+for a hobby aircraft in a 23 m yard. If that is the situation, better to know
+it now: it may be the fact that ends the drone branch in favor of the pan/tilt
+jet. **Measure the canopy before buying an airframe.**
+
+One static obstacle deserves naming on its own: **utility drops and
+clotheslines are effectively invisible** — to every sensor a small drone can
+carry, and to the pilot. Map them by hand.
+
+**(b) Unknown and moving obstacles** — a person, a dog, a thrown ball,
+laundry, a branch that came down last week. The site model cannot help; the
+drone needs its own sensing. Minimum viable is a downward rangefinder
+(VL53L1X or a small lidar) so altitude never depends on the barometer, plus
+forward proximity. ArduPilot's avoidance stack consumes proximity input and
+offers either simple avoidance (stop/slide) or a full planner. Configure it to
+**stop**, not to route around: stopping is analyzable and route-around is not.
+
+**(c) Occlusion in the fixed camera's own view** — the subtle one, and it
+corrupts *targeting* rather than flight. If the squirrel is behind the deck
+rail with only its head showing, the bottom of the bounding box is the
+**rail**, not its feet — so the contact point is wrong and the position
+estimate is confidently wrong. Catch it: if the box's bottom edge lies on a
+known occluder boundary, or the box is clipped by the frame edge, set
+`truncated: true` and either fall back to the stereo estimate or abort. This
+is the check that catches the dangerous class of error from §10.4.
+
+**(d) Obstacles to things that are not the drone.** The house is an RF
+obstacle — an aircraft behind the garage can lose its control link, so define
+the failsafe explicitly (RTL, not land-in-place). And Part 107 requires *you*
+to hold visual line of sight: the deck umbrella between you and the aircraft
+is a compliance problem rather than a technical one, and it is part of why §3
+chose tap-to-launch with a human outside watching.
+
+### 10.8 The time budget — the part that may change the concept
+
+Worth stating plainly, because it bounds everything above:
+
+| Step | Time |
+|---|---|
+| Detect → classify → decide | 0.3–1.0 s |
+| Dock open, arm, spin up | 5–10 s |
+| Climb to transit altitude | 3–5 s |
+| Transit ~20 m | 4–6 s |
+| Descend, acquire, servo | 5–10 s |
+| **Total** | **~20–35 s** |
+
+Chipmunk dwell at a bed is often under ten seconds. **The drone will
+routinely arrive after the animal has left.** That is not a tuning problem, it
+is physics, and no amount of guidance precision fixes it.
+
+Two consequences, both already in the plan and now better motivated. It is
+why §13/M2's ground effector comes first: a solenoid responds in under a
+second, and a pan/tilt jet aims straight off `world.bearing_deg` with no
+flight at all. And it recasts what the drone is *for* — not interception, but
+the unpredictable moving presence of §2. An aircraft that turns up 25 seconds
+later, from a direction that varies, is a **patrol**, and patrols work through
+expectation rather than through hits. Design the sortie for *presence over the
+bed* rather than *arrival at the fence post*, and the guidance requirement
+relaxes by an order of magnitude.
+
+## 11. Where an LLM fits — and where it must not
 
 Two hard rules first, because they eliminate the tempting answers:
 
@@ -644,7 +921,7 @@ decision where being wrong is unacceptable.
 With those settled, the useful roles are all **offline or out-of-band**, which
 is exactly where the Mac lives (§6).
 
-### 10.1 Ranked by value
+### 11.1 Ranked by value
 
 **1. Shadow-mode review assistant (§9.7).** You have to hand-review a week of
 "would have engaged" decisions before live fire. A VLM pre-triages that queue:
@@ -671,7 +948,7 @@ how that actually happens. Low risk — worst case is a wrong query you can read
 **5. Weekly digest.** Narrative summary with representative frames. Pleasant,
 marginal.
 
-### 10.2 The caveat that matters
+### 11.2 The caveat that matters
 
 **General VLMs are mediocre at fine-grained small-object recognition.**
 Telling an eastern gray squirrel from a chipmunk in a 50 px crop is precisely
@@ -682,7 +959,7 @@ confidently wrong often enough to matter.
 So the VLM proposes and assists; it is never ground truth, and it never
 replaces stage 2. Treat its labels as a prior to be confirmed.
 
-### 10.3 The better non-LLM answer: embeddings
+### 11.3 The better non-LLM answer: embeddings
 
 Worth more than items 3–5 combined, and often overlooked: run an image
 embedding model (DINOv2, SigLIP, or CLIP via ONNX) over every crop.
@@ -699,7 +976,7 @@ embedding model (DINOv2, SigLIP, or CLIP via ONNX) over every crop.
 This is small, fast, runs on the always-on box, and improves the thing the
 whole project depends on.
 
-### 10.4 Running it on the Mac
+### 11.4 Running it on the Mac
 
 MLX is the Apple-native runtime and currently the fastest way to run these on
 Apple Silicon; **mlx-vlm** is the vision-model wrapper. Ollama is the
@@ -720,7 +997,7 @@ top of what this machine holds, not a comfortable fit.** Two consequences:
 **Throughput: expect ~50 tok/s, not the ~68 tok/s usually quoted for "M4
 Max."** Token generation is memory-bandwidth-bound and the 32-core M4 Max is
 the binned part at **410 GB/s**, against 546 GB/s on the 40-core version.
-Since every LLM role here is batch and offline (§10.1), this is a throughput
+Since every LLM role here is batch and offline (§11.1), this is a throughput
 number, not a responsiveness one — it doesn't matter much.
 
 Fine-tuning the species classifier is untroubled by any of this: EfficientNet-B0
@@ -729,7 +1006,7 @@ and YOLO11-s are small, and 36 GB of unified memory allows generous batch sizes.
 **The Neural Engine is not the path.** MLX targets the GPU; the 16-core ANE is
 only reachable through CoreML. Not worth chasing for batch work.
 
-### 10.5 If you'd rather not run it locally
+### 11.5 If you'd rather not run it locally
 
 Cost is not the reason to go local. Adjudicating ~40 low-confidence events a
 day is ~44K input tokens plus ~4K output:
@@ -749,11 +1026,11 @@ capture sessions (§9.6) mean deliberately recording your family. That is the
 consideration worth weighing, and it is a genuine one — the dollars are noise
 either way.
 
-## 11. Data retention
+## 12. Data retention
 
 Optimized for: **short video life, permanent detailed records.**
 
-### 11.1 The key ratio
+### 12.1 The key ratio
 
 A 30 s clip of a squirrel at 4 MP is ~15 MB. The 224×224 crop cut out of it is
 ~20 KB. For *training* purposes those contain nearly the same information —
@@ -763,22 +1040,22 @@ behavior.
 So the design principle is: **keep the crop and the record forever; keep the
 clip only as long as you're actively reviewing it.**
 
-### 11.2 Never record continuously
+### 12.2 Never record continuously
 
-Continuous recording is ~75 GB/day (§13) for no benefit — nothing happens in
+Continuous recording is ~75 GB/day (§15) for no benefit — nothing happens in
 99% of those frames. Record detection segments only. In Frigate that means
 setting continuous retention to 0–1 days and relying on event-based retention
 (`record.alerts.retain.days` / `record.detections.retain.days`;
 verify the key names against 0.18, config changed across 0.17).
 
-### 11.3 Tiers
+### 12.3 Tiers
 
 Assuming ~200 detection events/day across three cameras in the daylight window:
 
 | Tier | Size/event | Retention | Steady state |
 |---|---|---|---|
 | **Event record** (SQLite row + trajectory) | ~3 KB | **forever** | 219 MB/yr |
-| **Crop** (224², best + 1 alt) | ~40 KB | **forever**, deduped (§10.3) | 2.9 GB/yr |
+| **Crop** (224², best + 1 alt) | ~40 KB | **forever**, deduped (§11.3) | 2.9 GB/yr |
 | **Contact sheet** (9 sampled frames, one montage JPEG) | ~150 KB | **1 year** | 11 GB |
 | **Full-res snapshot** | ~800 KB | **30 days** | 4.8 GB |
 | **Clip** (30 s H.265) | ~15 MB | **7 days** | 21 GB |
@@ -786,14 +1063,14 @@ Assuming ~200 detection events/day across three cameras in the daylight window:
 
 **Total steady state: ~40 GB**, against ~2.3 TB for naive continuous recording
 at 30-day retention. Roughly a 60× reduction, and it changes what you need to
-buy (§13).
+buy (§15).
 
 **The contact sheet is the trick.** Nine frames sampled across the event,
 tiled into one JPEG, is 1% of the clip's size and preserves the behavioral
 sequence — approach, pause, flee. It answers "what actually happened" for
 almost every event you'd otherwise pull the video for.
 
-### 11.4 What makes the record detailed enough to replace video
+### 12.4 What makes the record detailed enough to replace video
 
 This is the part that earns the short clip retention. Each event row carries:
 
@@ -823,7 +1100,7 @@ events × 3 KB compresses to ~150 KB/day — 55 MB/year, keep it forever. You ge
 `zgrep` over the full history and `falcon.db` for real queries, from one
 source of truth.
 
-### 11.5 Pinning — retention's exceptions
+### 12.5 Pinning — retention's exceptions
 
 Some events must ignore the tiers. **Pinned events never auto-delete** (clip
 retained 90 days, everything else forever):
@@ -833,24 +1110,24 @@ retained 90 days, everything else forever):
    something it shouldn't, this is the evidence.
 2. **Any protected-class detection near a decision** (§9.1) — same reason.
 3. **Stage disagreements** — MegaDetector vs. species model, or the VLM
-   adjudicator vs. the classifier (§10.1). These are the training-valuable
+   adjudicator vs. the classifier (§11.1). These are the training-valuable
    events.
 4. **Manually flagged** in the labeler.
 
 Pins are rare — a handful a day — so they cost little.
 
-### 11.6 Don't fight Frigate's retention engine
+### 12.6 Don't fight Frigate's retention engine
 
 Frigate manages its own media lifecycle and will happily delete a clip the
 policy wanted pinned. So: give Frigate a **short, generous-enough** window
 (~10 days), and have `falcon-brain` **copy pinned media out of Frigate's
 managed storage** into `media/pinned/` on write.
 
-A `falcon-janitor` job then enforces §11.3 over Falcon's own directories only.
+A `falcon-janitor` job then enforces §12.3 over Falcon's own directories only.
 Two systems, two storage areas, one owner each — rather than two retention
 engines arguing over the same files.
 
-## 12. Milestones
+## 13. Milestones
 
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
@@ -858,7 +1135,7 @@ stored with crop + clip, push notification with snapshot, labeler UI, first
 a measured decision on whether fine-tuning is even needed (§8.3), and staged
 capture sessions for the protected classes (§9.6).
 **No actuators at all.** Bootstrap the dataset offline from the existing Nest
-Cam (§14.1) before buying anything.
+Cam (§15.1) before buying anything.
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,
@@ -876,7 +1153,14 @@ crash into anything.
 
 A pan/tilt water jet (2 servos + solenoid, aimed from `world.bearing_deg`) is
 the highest effect-per-dollar actuator in the whole project and worth
-considering before the drone.
+considering before the drone. It is also the cheapest possible test of §10's
+targeting math: a jet that misses wastes water, so it is the right place to
+measure homography error, validate the site model, and prove the stereo
+solution before anything flies.
+
+M2 is also where the camera calibration work lands — homography per camera,
+the 2.5D surface model, and the stereo extrinsics (§10.2–10.3). None of it
+needs an aircraft.
 
 Exit criteria: one week of shadow mode reviewed by hand (§9.7), and
 P(predicted ∈ TARGETS | actual = cat) ≈ 0 on a cat-heavy held-out set (§9.5).
@@ -886,8 +1170,13 @@ Notification gains a **Launch** action → `POST /sortie` → scripted flight �
 FPV stream to phone → auto-RTL. Hard geofence, battery floor, abort button,
 and a propeller-guard requirement.
 
+Guidance, standoff waypoints, the abort ladder and the obstacle model are
+**§10**; the sortie's exit criteria live there too — the launch gate reads
+`world.method` and `world.sigma_m`, never `world.position_m`.
+
 **Gated on the §4.2 legal question** — resolve that before any hardware
-spend. Regardless of the answer, **build this against ArduPilot SITL + Gazebo
+spend, along with the §10.7 canopy measurement, which decides whether a clear
+transit altitude exists at all. Regardless of the answer, **build this against ArduPilot SITL + Gazebo
 first.** The entire sortie state
 machine, geofence logic, abort paths, and MAVLink plumbing can be written,
 tested, and CI'd with no hardware. Buy the airframe once the software flies in
@@ -899,7 +1188,7 @@ Randomized approach vectors, variable delays, audio profile rotation.
 Measure raid frequency over 30-day windows against M1's baseline. This is the
 only way to know whether any of it worked.
 
-## 13. Repo layout (proposed)
+## 14. Repo layout (proposed)
 
 ```
 falcon/
@@ -919,16 +1208,16 @@ falcon/
 └─ deploy/         compose.yaml, .env.example
 ```
 
-## 14. Hardware (M1 only)
+## 15. Hardware (M1 only)
 
 - 2–3 PoE cameras with RTSP and a usable sub-stream — see the shortlist in
-  §14.2. **Buy for lens, not megapixels** (§5), and start with one.
+  §15.2. **Buy for lens, not megapixels** (§5), and start with one.
 - PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
   end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2)
   — unless there is already power at a rear garage/shed, in which case the
   existing backyard WiFi is adequate and this line drops out.
 - An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
-- **Storage: a 500 GB SSD is plenty** under the retention policy in §11
+- **Storage: a 500 GB SSD is plenty** under the retention policy in §12
   (~40 GB steady state). Naive continuous recording would have needed ~2.3 TB
   for the same period — the policy, not the disk, is what solves this. Clips
   stay on the box; only crops go to the Mac.
@@ -938,7 +1227,7 @@ falcon/
 
 No drone spend until M3, and none at all until the software flies in SITL.
 
-### 14.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
+### 15.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
 
 **Not usable in the built system**, for two independent reasons.
 
@@ -987,7 +1276,7 @@ Note: without a Nest Aware subscription, wired cameras retain roughly 3 hours
 of event history, so collect the same day or subscribe for a month while
 building the dataset.
 
-### 14.2 Camera shortlist
+### 15.2 Camera shortlist
 
 Three buying rules first, because they eliminate most of the catalog:
 
@@ -1033,7 +1322,7 @@ Prices and model availability drift; verify current listings before ordering.
 EmpireTech is the US-market Dahua channel, and how you get genuine Dahua
 firmware stateside.
 
-## 15. Open questions
+## 16. Open questions
 
 Site-specific ones are in §4.3. Still open and affecting the build: the time
 budget. Language and deploy choices are now recorded as defaults in
@@ -1041,6 +1330,10 @@ budget. Language and deploy choices are now recorded as defaults in
 box — rather than left open; easy to revisit, since the MQTT contract is the
 only thing they'd have to honor.
 
-Resolved: tap-to-launch posture (§3), ground-effector-first (§12), M1 scope
-(§12), daylight-only (§8), compute topology (§6),
-never-target list (§9), backyard WiFi present (§5.2).
+Also open and now explicitly drone-gating: **tree canopy** (§4.3, §10.7) and
+the site frame/monument decision that all calibration depends on (§10.4).
+
+Resolved: tap-to-launch posture (§3), ground-effector-first (§13), M1 scope
+(§13), daylight-only (§8), compute topology (§6),
+never-target list (§9), backyard WiFi present (§5.2), target designation via
+stereo-with-surface-fallback and terminal visual servo (§10).
