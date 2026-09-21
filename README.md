@@ -10,5 +10,7 @@ Planning stage.
   pipeline, engagement policy, milestones
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — UML deployment view; what runs
   where and how it communicates
+- **[docs/COMPONENTS.md](docs/COMPONENTS.md)** — every component: what it does,
+  what it's built on, what it talks to, how it fails
 - **[docs/TECH_STACK.md](docs/TECH_STACK.md)** — pinned versions and the
   version policy

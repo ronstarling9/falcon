@@ -332,8 +332,9 @@ row.
 
 The always-on half runs in Docker Compose on the small box (§6), not on
 the Mac. Full deployment view — nodes, containers, protocols and ports — is in
-**[DEPLOYMENT.md](DEPLOYMENT.md)** (UML source: `deployment.puml`). Pinned
-versions are in **[TECH_STACK.md](TECH_STACK.md)**.
+**[DEPLOYMENT.md](DEPLOYMENT.md)** (UML source: `deployment.puml`);
+per-component detail in **[COMPONENTS.md](COMPONENTS.md)**; pinned versions in
+**[TECH_STACK.md](TECH_STACK.md)**.
 
 ## 8. The detection pipeline
 
@@ -824,7 +825,7 @@ only way to know whether any of it worked.
 
 ```
 falcon/
-├─ docs/           PLAN.md, DEPLOYMENT.md, TECH_STACK.md,
+├─ docs/           PLAN.md, DEPLOYMENT.md, COMPONENTS.md, TECH_STACK.md,
 │                  deployment.puml + renders, adr/, calibration notes
 ├─ services/
 │  ├─ ingest/      Frigate config, camera definitions, zones

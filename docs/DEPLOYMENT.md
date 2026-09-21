@@ -8,6 +8,10 @@ generated from it — don't hand-edit the render. Regenerate with
 
 ![Falcon deployment diagram](falcon-deployment.svg)
 
+Per-component detail — responsibilities, technology, interfaces, and failure
+modes — is in **[COMPONENTS.md](COMPONENTS.md)**. The tables below are the
+topology view for reading the diagram; that document is the reference view.
+
 Scope: M1 and M2 as deployed, M3 shown dashed because it is gated on the New
 Jersey wildlife question in [PLAN.md §4.2](PLAN.md).
 
