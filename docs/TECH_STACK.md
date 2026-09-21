@@ -9,7 +9,7 @@ Language choice is Python end to end. The CV half has no realistic
 alternative, and a single language across `classifier`, `brain`, and
 `effectors` removes a serialization boundary and a toolchain. The labeler is
 FastAPI + HTMX specifically to avoid introducing a JS build for one internal
-page. *(This was an open question in PLAN.md §16; recorded here as a default,
+page. *(This was an open question in PLAN.md §17; recorded here as a default,
 not a constraint — say the word and the `brain`/`effectors` services could be
 Go or TypeScript without touching the MQTT contract.)*
 
@@ -73,7 +73,7 @@ Avoid 3.15 until it has shipped and the wheels have caught up.
 | HTMX | 2.x | ~ | Labeler UI; no JS build step |
 | uv | current | ~ | Packaging and lockfile |
 | Ruff + mypy | current | ~ | Lint, types |
-| APScheduler (or systemd timer) | current | ~ | `falcon-janitor` retention sweeps (PLAN.md §12) |
+| APScheduler (or systemd timer) | current | ~ | `falcon-janitor` retention sweeps (PLAN.md §13) |
 
 ## Development machine
 
@@ -93,14 +93,14 @@ Apple MacBook Pro 14-inch, 2024 — Silver.
 Three numbers drive decisions elsewhere:
 
 - **36 GB** sets the local VLM ceiling. Qwen3-VL-30B-A3B (4-bit) fits but sits
-  at the top of it — see PLAN.md §11.4 for the wired-memory setting and why
+  at the top of it — see PLAN.md §12.4 for the wired-memory setting and why
   the VLM and a training run must not overlap.
 - **410 GB/s**, not 546. Token generation is bandwidth-bound, so expect ~50
   tok/s rather than the ~68 tok/s commonly quoted for "M4 Max." Irrelevant for
   batch work, which is all this project asks of it.
 - **1 TB** is ample for datasets (~5 GB at 50k crops) and must not become the
   footage archive. Clips live on the always-on box, which needs its own
-  sizing — PLAN.md §15.
+  sizing — PLAN.md §16.
 
 ## MacBook — training and labeling only
 
@@ -111,7 +111,7 @@ Three numbers drive decisions elsewhere:
 | Python | 3.14.x | ✓ | 3.14.7 stable; free to run ahead of the box |
 | Label Studio | 1.x | ~ | Only if the HTMX labeler proves insufficient |
 
-## Optional: LLM and embeddings (PLAN.md §11)
+## Optional: LLM and embeddings (PLAN.md §12)
 
 Offline and out-of-band only — never in the decision path, never the safety
 veto. Nothing here is required for M1.
@@ -122,12 +122,12 @@ veto. Nothing here is required for M1.
 | **Qwen3-VL-30B-A3B** | 4-bit MLX | ✓ | The local pick at ≥32 GB unified memory. MoE: 30B total, ~3B active, ~68 tok/s on M4 Max |
 | Gemma 4 E4B | current | ✓ | Tiny-model fallback for 8–16 GB |
 | Ollama | current | ~ | Lower-friction alternative to mlx-vlm |
-| DINOv2 / SigLIP | via ONNX Runtime | ~ | Crop embeddings: dataset dedup, similar-event retrieval, novelty detection (§11.3). Runs on the always-on box |
-| `anthropic` (Python SDK) | 1.x | ~ | Only if using the cloud path (§11.5). Batch API for 50% off; this workload is fully asynchronous |
+| DINOv2 / SigLIP | via ONNX Runtime | ~ | Crop embeddings: dataset dedup, similar-event retrieval, novelty detection (§12.3). Runs on the always-on box |
+| `anthropic` (Python SDK) | 1.x | ~ | Only if using the cloud path (§12.5). Batch API for 50% off; this workload is fully asynchronous |
 
 Cloud model IDs and rates if that path is taken: `claude-opus-5` ($5/$25 per
 MTok) or `claude-haiku-4-5` ($1/$5). Cost is negligible at this volume — see
-§11.5 for why privacy, not price, is the thing to weigh.
+§12.5 for why privacy, not price, is the thing to weigh.
 
 ## Edge firmware (M2)
 

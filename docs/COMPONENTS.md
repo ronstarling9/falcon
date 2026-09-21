@@ -90,7 +90,7 @@ valve de-energised, jet off. Configure the relay so the un-powered state is
 **Does** — Hosts every continuous part of the system. Deliberately separate
 from the MacBook, which sleeps and travels (PLAN.md §6).
 **Built on** — Used mini PC (OptiPlex Micro / ThinkCentre Tiny) or Pi 5,
-Debian 13, Docker Compose. 500 GB SSD is sufficient under the §12 retention
+Debian 13, Docker Compose. 500 GB SSD is sufficient under the §13 retention
 policy.
 **Fails by** — Everything stops. No detection, no logging, no notifications.
 Mitigation is boring and effective: Compose `restart: unless-stopped`, and a
@@ -116,7 +116,7 @@ publishes events to MQTT.
 **Consumes** — RTSP from cameras. **Produces** — `frigate/events` on MQTT,
 clips and snapshots on disk, HTTP API on 5000.
 **Key config** — Continuous retention at 0–1 days; event retention ~10 days
-(§12.2, §12.6). Detect stream sized per §5.
+(§13.2, §13.6). Detect stream sized per §5.
 **Fails by** — No events reach anything downstream, and the pipeline goes
 silent rather than wrong. Config is the real hazard: 0.17 shipped breaking
 changes with partial auto-migration, so read release notes before bumping.
@@ -155,15 +155,18 @@ provenance hashes are in the event record (§7).
 thresholds, protected-class vetoes, trailing windows, cooldowns, daylight
 gating, shadow mode. Writes the audit trail. Serves the HTTP API, including
 `POST /sortie` for tap-to-launch. Copies pinned media out of Frigate's
-lifecycle (§12.6). Owns **target designation** (§10): image ray → site model
+lifecycle (§13.6). Owns **target designation** (§10): image ray → site model
 or stereo → `world.position_m` with an uncertainty, and the launch gate that
 aborts on an ambiguous one.
 **Built on** — Python, FastAPI, Pydantic (the event contract in §7 is Pydantic
 models — one source of truth), paho-mqtt, OpenCV (calibration and projection
 only), NumPy.
 **Site truth** — `services/brain/site/`: per-camera intrinsics and extrinsics,
-the 2.5D surface polygons, obstacle heights, and the `site-enu` origin
-monument. Versioned, not configured.
+the 2.5D surface polygons, obstacle heights, per-zone altitude floors (§11.2),
+and the `site-enu` origin monument. Versioned, not configured.
+**Sortie budget** — `brain` also owns the §11.8 noise policy: sorties/day,
+sortie duration, inter-sortie gap, quiet windows, per-animal cap. The
+constraint most likely to end the project is social, so it is enforced in code.
 **Consumes** — `falcon/detections`. **Produces** — `falcon/actions`, rows in
 `falcon.db`, files in `media/pinned/`.
 **Fails by** — No decisions and no notifications. **This is the component that
@@ -185,7 +188,7 @@ firing when it shouldn't, which is why the veto lives in `brain`, upstream.
 
 ### `falcon-janitor`
 
-**Does** — Enforces the §12 retention tiers over Falcon's own directories:
+**Does** — Enforces the §13 retention tiers over Falcon's own directories:
 expires clips at 7 days, snapshots at 30, contact sheets at a year; never
 touches pinned events; writes the daily gzipped NDJSON export.
 **Built on** — Python, APScheduler or a systemd timer.
@@ -227,7 +230,7 @@ specifically to avoid a JS build for one internal page.
 **Does** — Fine-tunes the species classifier and evaluates it, notably
 `P(predicted ∈ TARGETS | actual = cat)` (§9.5), then exports ONNX for
 deployment.
-**Built on** — PyTorch MPS or MLX on the M4 Max. Note §11.4: don't run a
+**Built on** — PyTorch MPS or MLX on the M4 Max. Note §12.4: don't run a
 training job and a local VLM concurrently — 36 GB is shared.
 **Fails by** — No consequence to the running system.
 
@@ -248,7 +251,12 @@ deciding, so nothing is lost but timeliness.
 **Built on** — ArduPilot, MAVSDK-Python, Gazebo.
 **Guidance** — §10. Flies to a *standoff* waypoint sized by the cue's
 uncertainty, then acquires and servos on its own camera; it never navigates to
-the animal directly. Altitude from a downward rangefinder, position preferably
+the animal directly. Elevated targets (fence rail, deck rail) are rejected,
+not engaged.
+**Effect** — §11. One descending pass (looming is the cue that does the work),
+two passes maximum, no pursuit, break off at a per-zone altitude floor of
+2 m over lawn and 3–4 m over beds. It never makes contact, and that floor is
+a geofence in the flight code rather than a pilot rule. Altitude from a downward rangefinder, position preferably
 from optical flow rather than GPS at this lot size, obstacles by
 climb–cruise–descend against the site model plus forward proximity set to
 *stop*.

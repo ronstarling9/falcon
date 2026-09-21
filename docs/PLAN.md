@@ -38,6 +38,13 @@ delay, with a randomized audio profile, is one of the few deterrents that
 resists habituation. That is the real argument for it — not response latency,
 which it will lose at (see §3).
 
+The evidence is stronger than "plausible." Six years of grizzly-bear hazing
+(163 events) puts drones at **91% success**, ahead of vehicle pursuit and
+projectiles, with signs of genuine aversive conditioning over years rather
+than habituation; artificial-predator drones show no measurable habituation in
+bird flocks. Sources and the mechanism — *approach* is what separates a drone
+from a scarecrow — are in **§11.5**.
+
 ## 3. Three constraints that shape everything
 
 **Latency.** A chipmunk's visit is 5–20 s. Cold-pad launch to on-target is
@@ -299,7 +306,7 @@ on MPS; the SpeciesNet bootstrap pass is offline, so CPU fallback is fine if
 its ops don't map cleanly.
 
 **Zero-spend start.** Develop the entire pipeline natively on the Mac right
-now against clips from the Nest Cam already on hand (§15.1) or any video file — no Docker, no hardware. Buy the
+now against clips from the Nest Cam already on hand (§16.1) or any video file — no Docker, no hardware. Buy the
 always-on box only when you're ready to run continuously. That defers all
 spend past the point where you know the pipeline works.
 
@@ -315,7 +322,7 @@ spend past the point where you know the pipeline works.
                                        │            │
                                        └──► event store (SQLite + media on disk)
                                                     ▲
-                                              janitor (§12 tiers)
+                                              janitor (§13 tiers)
                                                     │
                                               labeler UI → training set → fine-tune
 ```
@@ -401,7 +408,7 @@ The loop:
    you are never labelling from scratch.
 3. **Verify** — confirm/correct in the labeler. The only expensive step, and
    it's an evening or three.
-4. **Dedup** — by embedding (§11.3). 3,000 near-identical crops are not 3,000
+4. **Dedup** — by embedding (§12.3). 3,000 near-identical crops are not 3,000
    examples.
 5. **Split** — see the traps below.
 6. **Train the head** — minutes to an hour on the M4 Max.
@@ -458,7 +465,7 @@ long shadows, so wide dynamic range on the cameras still matters.
 
 Optional slow path: a VLM on the snapshot as an out-of-band second opinion for
 low-confidence events. Not in the latency path — used to catch systematic
-errors and to prioritize what to label next. Expanded in §11.
+errors and to prioritize what to label next. Expanded in §12.
 
 ### Event contract
 
@@ -506,7 +513,15 @@ the drone lands:
     "rule": "protected_veto",
     "thresholds": { "engage": 0.80, "cat": 0.05 }
   },
-  "effector": null,
+  "effector": {
+    "kind": "drone",
+    "fired_at": "2026-09-20T14:22:16.110Z",
+    "passes": 1,
+    "min_standoff_m": 3.1,
+    "broke_off": "target_left_zone",
+    "outcome": { "displaced": true, "displace_latency_s": 2.8, "return_latency_s": 941 },
+    "sortie_budget": { "today": 3, "max_per_day": 6 }
+  },
 
   "media": {
     "crop_uri":    "file:///var/falcon/crop/…jpg",
@@ -519,7 +534,7 @@ the drone lands:
 }
 ```
 
-`track` is the field that earns the short clip retention (§12.4): the full
+`track` is the field that earns the short clip retention (§13.4): the full
 bbox path at detection rate is ~1 KB and reconstructs speed, entry edge, and
 approach vector without any video. `models` records provenance so a later
 re-analysis knows which model version produced which label.
@@ -650,6 +665,12 @@ costs a week and zero dollars. Do not skip it.
 The camera gives you a pixel. The flight controller wants a position.
 Everything in this section lives between those two sentences.
 
+**Scope note.** Elevated targets — fence rails, deck rails, lawn chairs — are
+out of engagement scope (§11). The surface model below is still worth
+building, but its job is now to *recognize and reject* an off-ground detection
+rather than to fly to one, and §10.1 is why: a ground-plane estimate for an
+elevated animal isn't merely imprecise, it is confidently wrong by 10–15 ft.
+
 ### 10.1 The projection problem — and why §7's homography is not enough
 
 A detection is a box in image space, `(u, v, w, h)`. Every pixel defines a
@@ -691,7 +712,7 @@ The drone doesn't miss by a little. It flies to a point ten to fifteen feet
 *past* the animal, which on a 75 ft lot can be over the neighbor's fence.
 
 So: **one homography is fine for a pan/tilt water jet aiming at ground beds
-(§13/M2), and disqualifying for a drone.** §7 now says so.
+(§14/M2), and disqualifying for a drone.** §7 now says so.
 
 ### 10.2 Fix 1 — a 2.5D site model instead of a single plane
 
@@ -896,7 +917,7 @@ routinely arrive after the animal has left.** That is not a tuning problem, it
 is physics, and no amount of guidance precision fixes it.
 
 Two consequences, both already in the plan and now better motivated. It is
-why §13/M2's ground effector comes first: a solenoid responds in under a
+why §14/M2's ground effector comes first: a solenoid responds in under a
 second, and a pan/tilt jet aims straight off `world.bearing_deg` with no
 flight at all. And it recasts what the drone is *for* — not interception, but
 the unpredictable moving presence of §2. An aircraft that turns up 25 seconds
@@ -905,7 +926,208 @@ expectation rather than through hits. Design the sortie for *presence over the
 bed* rather than *arrival at the fence post*, and the guidance requirement
 relaxes by an order of magnitude.
 
-## 11. Where an LLM fits — and where it must not
+## 11. The effect — what the drone actually does
+
+Scope for this section: **elevated targets are out of scope.** Fence rails,
+deck rails and lawn chairs stop being engagement targets; §10's surface model
+stays, but only to *reject* those detections rather than fly to them. Targeting
+is ground-plane, in the beds, good enough. And the working assumption is that
+the animal is usually gone before the aircraft arrives.
+
+Both assumptions are right, and they simplify the flight problem
+considerably. They also change what the drone is *for*, which is what this
+section is about.
+
+### 11.1 It never touches the animal
+
+This is the one property that has to be structurally impossible rather than
+carefully avoided.
+
+- Props against a 500 g squirrel is broken props and a crash. A 3 kg
+  groundhog is worse.
+- It injures the animal. The never-target list (§9) exists because you care
+  about that; the target list doesn't suspend it.
+- It converts "deterrence" into "harassment," which is the exact word the
+  §4.2 question turns on.
+- A cornered groundhog stands and fights, and groundhogs are a rabies vector
+  in New Jersey. Never create that encounter.
+
+So the entire effect happens at a distance, and the minimum standoff is a
+**geofence floor enforced in the flight code**, not a rule the pilot follows.
+
+### 11.2 How close it *can* get — the altitude floor
+
+Four constraints set the floor, and the binding one is not the animal:
+
+| Constraint | Implied floor |
+|---|---|
+| Ground effect / downwash instability | ~1 rotor diameter — 0.3–0.5 m for a 5″ quad. Not binding. |
+| Rangefinder + altitude-hold error over grass | ±0.2–0.3 m, so ≥1 m of margin |
+| Downwash blasting soil and seedlings | noticeable below ~1.5 m |
+| **Tomato cages, stakes, trellises, bean poles** | **1.5–2 m — this is the binding one** |
+
+**2 m AGL over open lawn, 3–4 m over planted beds.** The drone hovers *above*
+the tomato cages; it never descends among them. Encode it as a per-zone floor
+in the site model (§10.2), so the bed polygons carry their own ceiling of
+obstacles and the floor is data rather than a constant.
+
+### 11.3 How close it *will* get — the animal decides, not you
+
+The useful result from the gray-squirrel escape literature is that **flight
+initiation distance rises with distance to refuge**: a squirrel far from a
+tree flees early, one at the base of the maple lets you get close because
+escape costs it a second.
+
+That maps directly onto this problem. The beds — the only place you care
+about — are by definition away from refuge, so that is exactly where the
+animal flees at the longest distance. And the place where it *would* let you
+get close is the tree line, where you should not be flying anyway.
+
+Expect a flight response somewhere in the **5–15 m** band of approach, and
+expect the aircraft to essentially never close inside 3 m of an animal.
+Your assumption is correct, and it's the design working rather than failing.
+
+### 11.4 What actually produces the flight response
+
+Ranked by how much work each does:
+
+1. **Looming.** An object growing in the visual field on a descending
+   trajectory is the aerial-predator escape trigger. It is the strongest cue
+   available and it costs nothing — it is a trajectory choice, not a payload.
+   **Descend toward the animal; don't translate at constant altitude.** A
+   stoop from 6 m to the floor is the effect.
+2. **Noise.** A small quad is ~68 dB(A) at 10 m, ~78 at 3 m, ~82 at 2 m —
+   broadband plus a strong blade-pass tone. Loud, directional, and unlike
+   anything else in a suburban yard.
+3. **Shadow and motion.** A moving overhead shadow, free, and it works
+   precisely in the daylight window §8 already restricts you to.
+4. **Audio payload, optional.** A 30 g speaker. Raptor calls are the obvious
+   choice, but **conspecific alarm calls are the more interesting one** —
+   squirrel kuks and quaas recruit the animal's own signalling system rather
+   than asking it to believe in a hawk that isn't there. Rotate the library:
+   one fixed sound is the fastest component here to habituate.
+5. **Water** — the only genuine aversive on the list. See §11.6.
+
+Not worth carrying: strobes (useless in daylight, and night is out of scope),
+ultrasonic emitters (the pest-repeller industry's most reliably debunked
+product), and anything that makes contact.
+
+### 11.5 Habituation — the evidence is better than I assumed
+
+This is the question that decides whether any of it is worth building, so it
+deserves real evidence rather than a hunch.
+
+- **Grizzly-bear hazing, six years, 163 events** (Sarmento, *Frontiers in
+  Conservation Science*, 2025): drones succeeded in **91%** of hazing events,
+  against 85% for vehicle pursuit and 74% for projectiles; dogs were far
+  worse. More importantly it appears to have *conditioned* — older bears
+  required less hazing, events per year declined, and bears fled to locations
+  farther from roads and development.
+- **RobotFalcon vs. bird flocks**: no evidence of habituation over the
+  fieldwork period.
+- The disturbance literature is the same finding with the sign flipped —
+  terrestrial mammals show disturbance responses to drones below ~60 m AGL,
+  and some species habituate quickly.
+
+Sources:
+[drones vs. dogs for hazing bears](https://www.frontiersin.org/journals/conservation-science/articles/10.3389/fcosc.2024.1478450/full) ·
+[RobotFalcon bird deterrence](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9597169/) ·
+[distance-to-refuge and flight initiation distance in gray squirrels](https://www.sfu.ca/biology/faculty/dill/publications/dandH.pdf) ·
+[GUARD, an autonomous deer-deterrence UAV](https://arxiv.org/abs/2505.10770) ·
+[drone disturbance of colonial breeding birds](https://pmc.ncbi.nlm.nih.gov/articles/PMC12588502/)
+
+The synthesis worth internalizing: **a scarecrow habituates because it is
+static and consequence-free.** A drone that *approaches*, from a direction
+that varies, after a delay that varies, reads as a pursuing predator instead
+of scenery. That is the mechanism, and it is why §14/M4's randomization is the
+active ingredient rather than a refinement.
+
+### 11.6 Conditioning — the one genuinely good idea available here
+
+The drone is a **conditioned stimulus**; water is the **unconditioned
+aversive**. Pair them and the drone keeps working long after the novelty is
+gone.
+
+Except the timing is backwards, which falls straight out of §10.8: the
+sprinkler fires in under a second and the drone arrives at 25, so water
+*precedes* the aircraft and conditions nothing. Three ways out:
+
+- **(a) Delay the water to the drone's arrival** during an explicit
+  `conditioning_mode`. Costs you the fast response for a few weeks; buys a
+  durable association. A config flag, not a redesign.
+- **(b) Put the water on the drone.** A 100 mL reservoir plus a diaphragm
+  pump is ~150–200 g and delivers 20–30 mL. Stimulus and consequence
+  co-located, no timing problem. But a drone that *sprays* an animal is much
+  more plainly "harassment" than one that merely flies near it — this option
+  is gated harder on §4.2 than the rest of M3.
+- **(c) Don't condition — alternate.** Sprinkler on most raids, drone on a
+  random minority. Unpredictability without pairing. Weakest, simplest, no new
+  hardware, no new legal exposure.
+
+Start at **(c)**, measure with §14/M4, escalate to (a) if the data shows
+habituation. Take (b) only with a legal answer in hand.
+
+### 11.7 The sortie — arrival behavior and break-off
+
+Written for the common case, which is an empty bed:
+
+```
+arrive at standoff (3–6 m above, offset, §10.5)
+  ├─ target acquired?
+  │    yes → one descending pass toward it, break off at the zone floor
+  │          re-acquire; two passes maximum
+  │    no  → loiter/sweep the bed 10–20 s on a randomized track
+  └─ RTL
+```
+
+Two hard rules, both of which are cheaper than the alternative:
+
+**No pursuit.** A fleeing squirrel runs *to* a tree or a fence; following it
+at low altitude is how you fly into one. Break off the instant the target
+crosses a geofence edge, closes on an obstacle polygon, or leaves the bed.
+Deterrence only has to make the bed unattractive — it does not have to win the
+chase.
+
+**Two passes without flight is an abort, logged.** An animal that doesn't
+flee is cornered, defending young, sick, or genuinely habituated, and all four
+are reasons to stop rather than press. This is simultaneously the humane rule,
+the legally defensible one (the line between deterring and harassing), and the
+one that keeps you from descending onto an angry groundhog.
+
+### 11.8 The budget that will actually constrain this: noise
+
+~78 dB(A) at 3 m, several times a day, in a yard with neighbors about 25 ft
+away. Montclair has a noise ordinance and the neighbors have an opinion, and
+between them they are far more likely to end this project than any technical
+problem in the preceding ten sections.
+
+So budget it as policy in `brain`, not as good intentions:
+
+- max sorties per day (start at 6)
+- max sortie duration (60 s)
+- minimum inter-sortie gap (20 min)
+- a quiet window that isn't only night — Sunday mornings
+- a per-animal cap, so one stubborn groundhog can't generate twenty sorties
+
+And note the free mitigation: **the sprinkler is silent.** Every raid the
+ground effector handles is a sortie you don't fly, which is the thing that
+keeps the drone politically survivable.
+
+### 11.9 What to measure — not proximity, not hits
+
+Three numbers, all against M1's baseline (§14):
+
+- **Displacement** — did the animal leave the bed zone within N seconds of
+  the effector firing?
+- **Return latency** — time until the next detection of that species in that
+  bed.
+- **Raid rate** — detections per bed per day over 30-day windows.
+
+**Return latency is the leading indicator.** It shortens before the raid rate
+moves, so it's where habituation shows up first and where you'll see whether
+conditioning is working while there's still time to change the approach.
+
+## 12. Where an LLM fits — and where it must not
 
 Two hard rules first, because they eliminate the tempting answers:
 
@@ -921,7 +1143,7 @@ decision where being wrong is unacceptable.
 With those settled, the useful roles are all **offline or out-of-band**, which
 is exactly where the Mac lives (§6).
 
-### 11.1 Ranked by value
+### 12.1 Ranked by value
 
 **1. Shadow-mode review assistant (§9.7).** You have to hand-review a week of
 "would have engaged" decisions before live fire. A VLM pre-triages that queue:
@@ -948,7 +1170,7 @@ how that actually happens. Low risk — worst case is a wrong query you can read
 **5. Weekly digest.** Narrative summary with representative frames. Pleasant,
 marginal.
 
-### 11.2 The caveat that matters
+### 12.2 The caveat that matters
 
 **General VLMs are mediocre at fine-grained small-object recognition.**
 Telling an eastern gray squirrel from a chipmunk in a 50 px crop is precisely
@@ -959,7 +1181,7 @@ confidently wrong often enough to matter.
 So the VLM proposes and assists; it is never ground truth, and it never
 replaces stage 2. Treat its labels as a prior to be confirmed.
 
-### 11.3 The better non-LLM answer: embeddings
+### 12.3 The better non-LLM answer: embeddings
 
 Worth more than items 3–5 combined, and often overlooked: run an image
 embedding model (DINOv2, SigLIP, or CLIP via ONNX) over every crop.
@@ -976,7 +1198,7 @@ embedding model (DINOv2, SigLIP, or CLIP via ONNX) over every crop.
 This is small, fast, runs on the always-on box, and improves the thing the
 whole project depends on.
 
-### 11.4 Running it on the Mac
+### 12.4 Running it on the Mac
 
 MLX is the Apple-native runtime and currently the fastest way to run these on
 Apple Silicon; **mlx-vlm** is the vision-model wrapper. Ollama is the
@@ -997,7 +1219,7 @@ top of what this machine holds, not a comfortable fit.** Two consequences:
 **Throughput: expect ~50 tok/s, not the ~68 tok/s usually quoted for "M4
 Max."** Token generation is memory-bandwidth-bound and the 32-core M4 Max is
 the binned part at **410 GB/s**, against 546 GB/s on the 40-core version.
-Since every LLM role here is batch and offline (§11.1), this is a throughput
+Since every LLM role here is batch and offline (§12.1), this is a throughput
 number, not a responsiveness one — it doesn't matter much.
 
 Fine-tuning the species classifier is untroubled by any of this: EfficientNet-B0
@@ -1006,7 +1228,7 @@ and YOLO11-s are small, and 36 GB of unified memory allows generous batch sizes.
 **The Neural Engine is not the path.** MLX targets the GPU; the 16-core ANE is
 only reachable through CoreML. Not worth chasing for batch work.
 
-### 11.5 If you'd rather not run it locally
+### 12.5 If you'd rather not run it locally
 
 Cost is not the reason to go local. Adjudicating ~40 low-confidence events a
 day is ~44K input tokens plus ~4K output:
@@ -1026,11 +1248,11 @@ capture sessions (§9.6) mean deliberately recording your family. That is the
 consideration worth weighing, and it is a genuine one — the dollars are noise
 either way.
 
-## 12. Data retention
+## 13. Data retention
 
 Optimized for: **short video life, permanent detailed records.**
 
-### 12.1 The key ratio
+### 13.1 The key ratio
 
 A 30 s clip of a squirrel at 4 MP is ~15 MB. The 224×224 crop cut out of it is
 ~20 KB. For *training* purposes those contain nearly the same information —
@@ -1040,22 +1262,22 @@ behavior.
 So the design principle is: **keep the crop and the record forever; keep the
 clip only as long as you're actively reviewing it.**
 
-### 12.2 Never record continuously
+### 13.2 Never record continuously
 
-Continuous recording is ~75 GB/day (§15) for no benefit — nothing happens in
+Continuous recording is ~75 GB/day (§16) for no benefit — nothing happens in
 99% of those frames. Record detection segments only. In Frigate that means
 setting continuous retention to 0–1 days and relying on event-based retention
 (`record.alerts.retain.days` / `record.detections.retain.days`;
 verify the key names against 0.18, config changed across 0.17).
 
-### 12.3 Tiers
+### 13.3 Tiers
 
 Assuming ~200 detection events/day across three cameras in the daylight window:
 
 | Tier | Size/event | Retention | Steady state |
 |---|---|---|---|
 | **Event record** (SQLite row + trajectory) | ~3 KB | **forever** | 219 MB/yr |
-| **Crop** (224², best + 1 alt) | ~40 KB | **forever**, deduped (§11.3) | 2.9 GB/yr |
+| **Crop** (224², best + 1 alt) | ~40 KB | **forever**, deduped (§12.3) | 2.9 GB/yr |
 | **Contact sheet** (9 sampled frames, one montage JPEG) | ~150 KB | **1 year** | 11 GB |
 | **Full-res snapshot** | ~800 KB | **30 days** | 4.8 GB |
 | **Clip** (30 s H.265) | ~15 MB | **7 days** | 21 GB |
@@ -1063,14 +1285,14 @@ Assuming ~200 detection events/day across three cameras in the daylight window:
 
 **Total steady state: ~40 GB**, against ~2.3 TB for naive continuous recording
 at 30-day retention. Roughly a 60× reduction, and it changes what you need to
-buy (§15).
+buy (§16).
 
 **The contact sheet is the trick.** Nine frames sampled across the event,
 tiled into one JPEG, is 1% of the clip's size and preserves the behavioral
 sequence — approach, pause, flee. It answers "what actually happened" for
 almost every event you'd otherwise pull the video for.
 
-### 12.4 What makes the record detailed enough to replace video
+### 13.4 What makes the record detailed enough to replace video
 
 This is the part that earns the short clip retention. Each event row carries:
 
@@ -1100,7 +1322,7 @@ events × 3 KB compresses to ~150 KB/day — 55 MB/year, keep it forever. You ge
 `zgrep` over the full history and `falcon.db` for real queries, from one
 source of truth.
 
-### 12.5 Pinning — retention's exceptions
+### 13.5 Pinning — retention's exceptions
 
 Some events must ignore the tiers. **Pinned events never auto-delete** (clip
 retained 90 days, everything else forever):
@@ -1110,24 +1332,24 @@ retained 90 days, everything else forever):
    something it shouldn't, this is the evidence.
 2. **Any protected-class detection near a decision** (§9.1) — same reason.
 3. **Stage disagreements** — MegaDetector vs. species model, or the VLM
-   adjudicator vs. the classifier (§11.1). These are the training-valuable
+   adjudicator vs. the classifier (§12.1). These are the training-valuable
    events.
 4. **Manually flagged** in the labeler.
 
 Pins are rare — a handful a day — so they cost little.
 
-### 12.6 Don't fight Frigate's retention engine
+### 13.6 Don't fight Frigate's retention engine
 
 Frigate manages its own media lifecycle and will happily delete a clip the
 policy wanted pinned. So: give Frigate a **short, generous-enough** window
 (~10 days), and have `falcon-brain` **copy pinned media out of Frigate's
 managed storage** into `media/pinned/` on write.
 
-A `falcon-janitor` job then enforces §12.3 over Falcon's own directories only.
+A `falcon-janitor` job then enforces §13.3 over Falcon's own directories only.
 Two systems, two storage areas, one owner each — rather than two retention
 engines arguing over the same files.
 
-## 13. Milestones
+## 14. Milestones
 
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
@@ -1135,7 +1357,7 @@ stored with crop + clip, push notification with snapshot, labeler UI, first
 a measured decision on whether fine-tuning is even needed (§8.3), and staged
 capture sessions for the protected classes (§9.6).
 **No actuators at all.** Bootstrap the dataset offline from the existing Nest
-Cam (§15.1) before buying anything.
+Cam (§16.1) before buying anything.
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,
@@ -1171,8 +1393,14 @@ FPV stream to phone → auto-RTL. Hard geofence, battery floor, abort button,
 and a propeller-guard requirement.
 
 Guidance, standoff waypoints, the abort ladder and the obstacle model are
-**§10**; the sortie's exit criteria live there too — the launch gate reads
-`world.method` and `world.sigma_m`, never `world.position_m`.
+**§10** — the launch gate reads `world.method` and `world.sigma_m`, never
+`world.position_m`. What the aircraft actually does on arrival, the altitude
+floor, the break-off rules and the noise budget are **§11**.
+
+Exit criteria: 100 SITL sorties with zero floor violations and zero geofence
+breaches; the two-passes-without-flight abort (§11.7) exercised in sim;
+a sortie budget enforced in `brain` (§11.8); and displacement + return latency
+(§11.9) logged for every sortie from the first live flight.
 
 **Gated on the §4.2 legal question** — resolve that before any hardware
 spend, along with the §10.7 canopy measurement, which decides whether a clear
@@ -1184,11 +1412,16 @@ sim. Platform choice (custom PX4/ArduPilot + Pi companion, vs. Parrot/Olympe)
 stays deferred until then — the `Effector` interface hides it either way.
 
 ### M4 — Conditioning experiment
-Randomized approach vectors, variable delays, audio profile rotation.
-Measure raid frequency over 30-day windows against M1's baseline. This is the
-only way to know whether any of it worked.
+Randomized approach vectors, variable delays, audio profile rotation — the
+active ingredient, not a refinement (§11.5). Measure displacement, return
+latency and raid rate over 30-day windows against M1's baseline (§11.9). This
+is the only way to know whether any of it worked.
 
-## 14. Repo layout (proposed)
+Start in the un-paired regime (§11.6c): sprinkler on most raids, drone on a
+random minority. If return latency starts shortening, that's habituation, and
+`conditioning_mode` (§11.6a) is the next move — not a bigger drone.
+
+## 15. Repo layout (proposed)
 
 ```
 falcon/
@@ -1208,16 +1441,16 @@ falcon/
 └─ deploy/         compose.yaml, .env.example
 ```
 
-## 15. Hardware (M1 only)
+## 16. Hardware (M1 only)
 
 - 2–3 PoE cameras with RTSP and a usable sub-stream — see the shortlist in
-  §15.2. **Buy for lens, not megapixels** (§5), and start with one.
+  §16.2. **Buy for lens, not megapixels** (§5), and start with one.
 - PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
   end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2)
   — unless there is already power at a rear garage/shed, in which case the
   existing backyard WiFi is adequate and this line drops out.
 - An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
-- **Storage: a 500 GB SSD is plenty** under the retention policy in §12
+- **Storage: a 500 GB SSD is plenty** under the retention policy in §13
   (~40 GB steady state). Naive continuous recording would have needed ~2.3 TB
   for the same period — the policy, not the disk, is what solves this. Clips
   stay on the box; only crops go to the Mac.
@@ -1227,7 +1460,7 @@ falcon/
 
 No drone spend until M3, and none at all until the software flies in SITL.
 
-### 15.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
+### 16.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
 
 **Not usable in the built system**, for two independent reasons.
 
@@ -1276,7 +1509,7 @@ Note: without a Nest Aware subscription, wired cameras retain roughly 3 hours
 of event history, so collect the same day or subscribe for a month while
 building the dataset.
 
-### 15.2 Camera shortlist
+### 16.2 Camera shortlist
 
 Three buying rules first, because they eliminate most of the catalog:
 
@@ -1322,7 +1555,7 @@ Prices and model availability drift; verify current listings before ordering.
 EmpireTech is the US-market Dahua channel, and how you get genuine Dahua
 firmware stateside.
 
-## 16. Open questions
+## 17. Open questions
 
 Site-specific ones are in §4.3. Still open and affecting the build: the time
 budget. Language and deploy choices are now recorded as defaults in
@@ -1333,7 +1566,7 @@ only thing they'd have to honor.
 Also open and now explicitly drone-gating: **tree canopy** (§4.3, §10.7) and
 the site frame/monument decision that all calibration depends on (§10.4).
 
-Resolved: tap-to-launch posture (§3), ground-effector-first (§13), M1 scope
-(§13), daylight-only (§8), compute topology (§6),
+Resolved: tap-to-launch posture (§3), ground-effector-first (§14), M1 scope
+(§14), daylight-only (§8), compute topology (§6),
 never-target list (§9), backyard WiFi present (§5.2), target designation via
 stereo-with-surface-fallback and terminal visual servo (§10).

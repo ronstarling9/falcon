@@ -55,7 +55,7 @@ node "House LAN" <<site>> {
       }
       node "falcon-effectors" <<container>> as C_EFF
       node "falcon-janitor" <<container>> as C_JAN {
-        artifact "retention tiers §12" as A_JAN
+        artifact "retention tiers §13" as A_JAN
       }
       node "ntfy" <<container>> as C_NTFY
     }
