@@ -79,6 +79,24 @@ Avoid 3.15 until it has shipped and the wheels have caught up.
 | Python | 3.14.x | ✓ | 3.14.7 stable; free to run ahead of the box |
 | Label Studio | 1.x | ~ | Only if the HTMX labeler proves insufficient |
 
+## Optional: LLM and embeddings (PLAN.md §10)
+
+Offline and out-of-band only — never in the decision path, never the safety
+veto. Nothing here is required for M1.
+
+| Component | Version | Verified | Notes |
+|---|---|---|---|
+| **mlx-vlm** | current | ✓ | Apple-native VLM inference on the Mac; MLX beats llama.cpp by a wide margin on Apple Silicon |
+| **Qwen3-VL-30B-A3B** | 4-bit MLX | ✓ | The local pick at ≥32 GB unified memory. MoE: 30B total, ~3B active, ~68 tok/s on M4 Max |
+| Gemma 4 E4B | current | ✓ | Tiny-model fallback for 8–16 GB |
+| Ollama | current | ~ | Lower-friction alternative to mlx-vlm |
+| DINOv2 / SigLIP | via ONNX Runtime | ~ | Crop embeddings: dataset dedup, similar-event retrieval, novelty detection (§10.3). Runs on the always-on box |
+| `anthropic` (Python SDK) | 1.x | ~ | Only if using the cloud path (§10.5). Batch API for 50% off; this workload is fully asynchronous |
+
+Cloud model IDs and rates if that path is taken: `claude-opus-5` ($5/$25 per
+MTok) or `claude-haiku-4-5` ($1/$5). Cost is negligible at this volume — see
+§10.5 for why privacy, not price, is the thing to weigh.
+
 ## Edge firmware (M2)
 
 | Component | Version | Verified | Notes |

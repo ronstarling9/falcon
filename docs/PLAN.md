@@ -296,7 +296,7 @@ on MPS; the SpeciesNet bootstrap pass is offline, so CPU fallback is fine if
 its ops don't map cleanly.
 
 **Zero-spend start.** Develop the entire pipeline natively on the Mac right
-now against clips from the Nest Cam already on hand (§12.1) or any video file — no Docker, no hardware. Buy the
+now against clips from the Nest Cam already on hand (§13.1) or any video file — no Docker, no hardware. Buy the
 always-on box only when you're ready to run continuously. That defers all
 spend past the point where you know the pipeline works.
 
@@ -375,7 +375,7 @@ long shadows, so wide dynamic range on the cameras still matters.
 
 Optional slow path: a VLM on the snapshot as an out-of-band second opinion for
 low-confidence events. Not in the latency path — used to catch systematic
-errors and to prioritize what to label next.
+errors and to prioritize what to label next. Expanded in §10.
 
 ### Event contract
 
@@ -519,14 +519,122 @@ Then review every would-have-fired event by hand.
 This is how you find the cat-read-as-squirrel *before* it hits a cat, and it
 costs a week and zero dollars. Do not skip it.
 
-## 10. Milestones
+## 10. Where an LLM fits — and where it must not
+
+Two hard rules first, because they eliminate the tempting answers:
+
+**Never in the latency path.** The decision budget is sub-second (§9.4). Even a
+local 7B VLM is 1–3 s per image, and a cloud call adds a network round trip.
+An LLM cannot be the thing that decides to fire.
+
+**Never the safety veto.** The protected-class check (§9.1) must be fast,
+deterministic, and measurable. A non-deterministic model that might describe a
+cat differently on two consecutive frames is the wrong tool for the one
+decision where being wrong is unacceptable.
+
+With those settled, the useful roles are all **offline or out-of-band**, which
+is exactly where the Mac lives (§6).
+
+### 10.1 Ranked by value
+
+**1. Shadow-mode review assistant (§9.7).** You have to hand-review a week of
+"would have engaged" decisions before live fire. A VLM pre-triages that queue:
+flag the ones whose snapshot doesn't match the predicted label, cluster the
+failures, surface patterns ("most false positives are the fence post at
+16:40"). It doesn't replace your review — it orders it, so the hour you spend
+looks at the informative cases first. Biggest labor saving in the project.
+
+**2. Labeling bootstrap and active learning (§8, stage 3).** Pre-label crops so
+human verification becomes confirm/correct rather than type-a-name. Then close
+the loop: rank unlabeled crops by classifier uncertainty, have the VLM propose
+labels for the most uncertain, and verify those first. That is standard active
+learning and it is where the labeling time actually goes.
+
+**3. Low-confidence adjudication.** The slow path already in §8: a second
+opinion on events the classifier wasn't sure about, out of band, to catch
+systematic errors and build the eval set. Never in the decision loop.
+
+**4. Natural-language query over the event log.** Text-to-SQL against
+`falcon.db`: *"every groundhog in bed 2 before 09:00 last week."* The M1
+deliverable is understanding the baseline (§9), and exploratory questions are
+how that actually happens. Low risk — worst case is a wrong query you can read.
+
+**5. Weekly digest.** Narrative summary with representative frames. Pleasant,
+marginal.
+
+### 10.2 The caveat that matters
+
+**General VLMs are mediocre at fine-grained small-object recognition.**
+Telling an eastern gray squirrel from a chipmunk in a 50 px crop is precisely
+the task where a purpose-trained classifier beats a generalist — SpeciesNet and
+your own fine-tune (§8) will outperform any VLM here, and the VLM will be
+confidently wrong often enough to matter.
+
+So the VLM proposes and assists; it is never ground truth, and it never
+replaces stage 2. Treat its labels as a prior to be confirmed.
+
+### 10.3 The better non-LLM answer: embeddings
+
+Worth more than items 3–5 combined, and often overlooked: run an image
+embedding model (DINOv2, SigLIP, or CLIP via ONNX) over every crop.
+
+- **Dataset dedup.** After a month you will have thousands of near-identical
+  crops of the same squirrel on the same fence post. Train on that and you have
+  a 3,000-image dataset with maybe 400 images of information. Embedding
+  clustering finds the duplicates before they poison the fine-tune.
+- **"Find similar events"** in the labeler — label one, label its whole
+  cluster.
+- **Cheap novelty detection.** A crop far from every known cluster is either a
+  new species or a new failure mode. Both are worth looking at.
+
+This is small, fast, runs on the always-on box, and improves the thing the
+whole project depends on.
+
+### 10.4 Running it on the Mac
+
+MLX is the Apple-native runtime and currently the fastest way to run these on
+Apple Silicon; **mlx-vlm** is the vision-model wrapper. Ollama is the
+lower-friction alternative.
+
+RAM, not GPU cores, is the binding constraint:
+
+| Unified memory | Model | Notes |
+|---|---|---|
+| 48 GB+ | **Qwen3-VL-30B-A3B** (4-bit MLX) | The pick. MoE — 30B total but ~3B active, so ~68 tok/s on an M4 Max despite its size. Needs ≥32 GB |
+| 24–32 GB | Qwen3-VL 8B class | Comfortable, noticeably weaker on fine detail |
+| 8–16 GB | Gemma 4 E4B | Best of the tiny multimodal models |
+
+All of these are batch jobs on a machine that is already the training box —
+they cost nothing per run and no footage leaves the house.
+
+### 10.5 If you'd rather not run it locally
+
+Cost is not the reason to go local. Adjudicating ~40 low-confidence events a
+day is ~44K input tokens plus ~4K output:
+
+| Model | Per month | One-time 3K-crop bootstrap |
+|---|---|---|
+| `claude-opus-5` ($5/$25 per MTok) | ~$10, or ~$5 batched | ~$13, ~$7 batched |
+| `claude-haiku-4-5` ($1/$5 per MTok) | ~$2, or ~$1 batched | ~$2.70, ~$1.40 batched |
+
+The Batch API is 50% off and this workload is entirely asynchronous, so use it.
+Prompt caching helps too — the instruction prefix and few-shot examples are
+identical across every call, so put them before the image.
+
+**The real argument for local is privacy, not cost.** These cameras point at
+your own house (§5.1), your kids are on the never-target list (§9.2), and staged
+capture sessions (§9.6) mean deliberately recording your family. That is the
+consideration worth weighing, and it is a genuine one — the dollars are noise
+either way.
+
+## 11. Milestones
 
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
 stored with crop + clip, push notification with snapshot, labeler UI, first
 fine-tune, and staged capture sessions for the protected classes (§9.6).
 **No actuators at all.** Bootstrap the dataset offline from the existing Nest
-Cam (§12.1) before buying anything.
+Cam (§13.1) before buying anything.
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,
@@ -567,7 +675,7 @@ Randomized approach vectors, variable delays, audio profile rotation.
 Measure raid frequency over 30-day windows against M1's baseline. This is the
 only way to know whether any of it worked.
 
-## 11. Repo layout (proposed)
+## 12. Repo layout (proposed)
 
 ```
 falcon/
@@ -587,10 +695,10 @@ falcon/
 └─ deploy/         compose.yaml, .env.example
 ```
 
-## 12. Hardware (M1 only)
+## 13. Hardware (M1 only)
 
 - 2–3 PoE cameras with RTSP and a usable sub-stream — see the shortlist in
-  §12.2. **Buy for lens, not megapixels** (§5), and start with one.
+  §13.2. **Buy for lens, not megapixels** (§5), and start with one.
 - PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
   end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2)
   — unless there is already power at a rear garage/shed, in which case the
@@ -602,7 +710,7 @@ falcon/
 
 No drone spend until M3, and none at all until the software flies in SITL.
 
-### 12.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
+### 13.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
 
 **Not usable in the built system**, for two independent reasons.
 
@@ -651,7 +759,7 @@ Note: without a Nest Aware subscription, wired cameras retain roughly 3 hours
 of event history, so collect the same day or subscribe for a month while
 building the dataset.
 
-### 12.2 Camera shortlist
+### 13.2 Camera shortlist
 
 Three buying rules first, because they eliminate most of the catalog:
 
@@ -697,7 +805,7 @@ Prices and model availability drift; verify current listings before ordering.
 EmpireTech is the US-market Dahua channel, and how you get genuine Dahua
 firmware stateside.
 
-## 13. Open questions
+## 14. Open questions
 
 Site-specific ones are in §4.3. Still open and affecting the build: the time
 budget. Language and deploy choices are now recorded as defaults in
@@ -705,6 +813,6 @@ budget. Language and deploy choices are now recorded as defaults in
 box — rather than left open; easy to revisit, since the MQTT contract is the
 only thing they'd have to honor.
 
-Resolved: tap-to-launch posture (§3), ground-effector-first (§10), M1 scope
-(§10), daylight-only (§8), compute topology (§6),
+Resolved: tap-to-launch posture (§3), ground-effector-first (§11), M1 scope
+(§11), daylight-only (§8), compute topology (§6),
 never-target list (§9), backyard WiFi present (§5.2).
