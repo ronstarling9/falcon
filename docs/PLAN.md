@@ -6,6 +6,81 @@ foundation.
 
 Status: planning. Nothing built yet.
 
+## 0. KISS and YAGNI — read this before building anything
+
+**Governing constraint: keep it simple, stupid, and you aren't gonna need
+it.** Working agreements are in [CLAUDE.md](../CLAUDE.md); this section is
+what they mean for *this* plan.
+
+The plan is a map of the problem space. It is **not** a build order, and most
+of it should never be built. Sections 5–11 exist so that when a decision comes
+up, the reasoning is already done — not so that every idea in them ships.
+
+Two honest admissions about the document you're reading:
+
+- It is ~1,600 lines against **zero lines of code.** That ratio is itself the
+  violation. Docs stop growing until code catches up.
+- Several sections describe machinery earned by problems that have not
+  happened yet. They are marked below.
+
+### Build now — the whole of M1
+
+**One camera. Frigate. A classifier sidecar. A push notification. SQLite.**
+
+That's it. Not two cameras, not three, not an accelerator, not a labeler UI,
+not a janitor. Start on video files from the Nest Cam already on hand (§16.1)
+and buy the first camera once the pipeline works on recordings.
+
+### Defer until something actually hurts
+
+| Thing | Build it when |
+|---|---|
+| 2nd and 3rd camera | one camera's px/ft and framing assumptions are confirmed in the field (§5) |
+| Edge accelerator | CPU inference is measured too slow. Motion gating means ~1% duty cycle — it may never be |
+| Labeler UI | a directory of crops and a CSV stops being enough |
+| `falcon-janitor`, retention tiers, pinning (§13) | disk actually fills. Frigate's own retention is sufficient until then |
+| Contact sheets | you've wanted one and not had it |
+| Fine-tuning (§8.3) | measured accuracy says so. Rungs 1–3 of that ladder are not training |
+
+### Probably never — and that's the correct outcome
+
+These are in the plan because the reasoning is worth having on file, not
+because they're on a roadmap:
+
+- **Stereo triangulation** (§10.3) and the **2.5D site model** (§10.2).
+  Targeting doesn't need to be perfect, and elevated targets are out of
+  scope. One ground-plane homography over the beds, rejecting everything
+  else, is the simple answer — and it's the whole of what §11's effect model
+  requires.
+- **An LLM anywhere in the pipeline** (§12). §12 already concludes "not in
+  the hot path." The honest simplification is: not anywhere, until something
+  specific demands it.
+- **Embeddings / individual re-identification** (§12.3).
+- **A water payload on the drone** (§11.6b) and `conditioning_mode`
+  (§11.6a). Start un-paired.
+- **The drone itself**, if §4.2 resolves against it or the canopy blocks a
+  transit altitude (§10.7). The pan/tilt water jet does most of the job for a
+  fraction of the cost and risk, and that would be a good outcome, not a
+  failure.
+
+### Where complexity stays
+
+Two exceptions, both safety rather than engineering taste:
+
+1. **The protected-class veto** (§9) — dogs, cats, children, birds.
+   Asymmetric error costs justify asymmetric machinery.
+2. **Anything that can move or hurt** (§11) — geofence floors, break-off
+   rules, sortie budgets, abort paths.
+
+Simplify everywhere else. Argue for less.
+
+### The test to apply
+
+Before building anything from §5 onward:
+
+> Has the simpler version been built and failed? If not, build that instead,
+> and write down what failed when it does.
+
 ## 1. The core design decision
 
 Separate **watching** from **scaring**. They have opposite requirements:
@@ -1352,12 +1427,15 @@ engines arguing over the same files.
 ## 14. Milestones
 
 ### M1 — Detect, notify, log  ← current
-Cameras mounted, Frigate ingesting, two-stage classifier running, every event
-stored with crop + clip, push notification with snapshot, labeler UI, first
-a measured decision on whether fine-tuning is even needed (§8.3), and staged
-capture sessions for the protected classes (§9.6).
-**No actuators at all.** Bootstrap the dataset offline from the existing Nest
-Cam (§16.1) before buying anything.
+**One camera** mounted, Frigate ingesting, two-stage classifier running, every
+event stored with crop + clip, push notification with snapshot. **No actuators
+at all.** Bootstrap offline from the existing Nest Cam (§16.1) before buying
+anything.
+
+Labeling is a directory of crops and a CSV until that stops working — not a
+UI. Retention is Frigate's own until the disk complains — not a janitor
+(§0). The measured fine-tuning decision (§8.3) and staged protected-class
+capture (§9.6) both come out of this data, and neither needs new software.
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,

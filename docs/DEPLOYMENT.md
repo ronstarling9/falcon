@@ -1,5 +1,11 @@
 # Deployment
 
+> **This is the M3 end state, not a build order.** M1 is one camera, Frigate,
+> the classifier sidecar, SQLite and ntfy — five boxes on this diagram, not
+> nineteen. `falcon-janitor`, the second and third cameras, the edge
+> accelerator and everything under "M3 gated" are deferred. See
+> [PLAN.md §0](PLAN.md#0-kiss-and-yagni--read-this-before-building-anything).
+
 UML deployment view of Falcon: what runs where, and how the pieces talk.
 
 **Canonical source: [`deployment.puml`](deployment.puml).** The image below is
