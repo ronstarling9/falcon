@@ -328,7 +328,9 @@ never-target list, quiet hours, and the audit log. Every effector action is a
 row.
 
 The always-on half runs in Docker Compose on the small box (§6), not on
-the Mac.
+the Mac. Full deployment view — nodes, containers, protocols and ports — is in
+**[DEPLOYMENT.md](DEPLOYMENT.md)** (UML source: `deployment.puml`). Pinned
+versions are in **[TECH_STACK.md](TECH_STACK.md)**.
 
 ## 8. The detection pipeline
 
@@ -569,7 +571,8 @@ only way to know whether any of it worked.
 
 ```
 falcon/
-├─ docs/           PLAN.md, adr/, calibration notes
+├─ docs/           PLAN.md, DEPLOYMENT.md, TECH_STACK.md,
+│                  deployment.puml + renders, adr/, calibration notes
 ├─ services/
 │  ├─ ingest/      Frigate config, camera definitions, zones
 │  ├─ classifier/  MegaDetector → species, MQTT in/out
@@ -580,6 +583,7 @@ falcon/
 ├─ tools/
 │  ├─ labeler/     verify crops, export dataset
 │  └─ train/       fine-tune + eval scripts
+├─ tools/render-diagrams.sh
 └─ deploy/         compose.yaml, .env.example
 ```
 
@@ -695,9 +699,11 @@ firmware stateside.
 
 ## 13. Open questions
 
-Site-specific ones are in §4.3. Still open and affecting the build: the
-language/deploy preferences for the non-CV services, and
-the time budget.
+Site-specific ones are in §4.3. Still open and affecting the build: the time
+budget. Language and deploy choices are now recorded as defaults in
+[TECH_STACK.md](TECH_STACK.md) — Python end to end, Compose on the always-on
+box — rather than left open; easy to revisit, since the MQTT contract is the
+only thing they'd have to honor.
 
 Resolved: tap-to-launch posture (§3), ground-effector-first (§10), M1 scope
 (§10), daylight-only (§8), compute topology (§6),

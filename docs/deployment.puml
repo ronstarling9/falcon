@@ -1,0 +1,113 @@
+@startuml falcon-deployment
+' Falcon — UML Deployment Diagram
+' Canonical source. Render: plantuml -tsvg docs/deployment.puml
+' Protocol/port detail lives in DEPLOYMENT.md; edge labels here stay terse
+' so graphviz can lay the graph out legibly.
+
+title Falcon — Deployment Diagram\nM1/M2 deployed · M3 gated (PLAN.md §4.2)
+
+!pragma layout elk
+skinparam shadowing false
+skinparam nodesep 12
+skinparam ranksep 28
+skinparam defaultFontSize 12
+skinparam ArrowFontSize 10
+
+'=========================== GARDEN ===========================
+node "Garden — west end of lot" <<site>> {
+  node "Species Camera ×2" <<device>> as CAM {
+    artifact "RTSP main 2688×1520" as A_MAIN
+    artifact "RTSP sub 704×576" as A_SUB
+  }
+  node "Context Camera ×1" <<device>> as CAMW
+  node "Outdoor PoE Switch" <<device>> as SW_YARD
+  node "Effector Controller\nESP32" <<device>> as ESP {
+    node "ESPHome" <<executionEnvironment>> {
+      artifact "falcon-effector.yaml" as A_ESP
+    }
+  }
+  node "Actuator\nvalve / pan-tilt jet" <<device>> as ACT
+}
+
+'=========================== HOUSE LAN ===========================
+node "House LAN" <<site>> {
+  node "Router + PoE Switch" <<device>> as SW_HOUSE
+
+  node "Always-On Box\nmini PC or Pi 5 · Debian 13" <<device>> as BOX {
+    node "Edge Accelerator\nCoral / Hailo-8L" <<device>> as TPU
+    database "falcon.db\nSQLite WAL" as DB
+    folder "media/\nsnapshots · crops · clips" as MEDIA
+
+    node "Docker Engine + Compose v2" <<executionEnvironment>> as DOCKER {
+      node "frigate" <<container>> as C_FRIGATE {
+        artifact "go2rtc" as A_G2R
+        artifact "motion gate + zones" as A_ZONE
+      }
+      node "mosquitto" <<container>> as C_MQTT
+      node "falcon-classifier" <<container>> as C_CLS {
+        artifact "MegaDetector v6\nONNX int8" as A_MD
+        artifact "species-clf.onnx" as A_SPC
+      }
+      node "falcon-brain" <<container>> as C_BRAIN {
+        artifact "policy §9" as A_POL
+        artifact "FastAPI" as A_API
+      }
+      node "falcon-effectors" <<container>> as C_EFF
+      node "ntfy" <<container>> as C_NTFY
+    }
+  }
+}
+
+'=========================== OFF-LAN ===========================
+node "MacBook Pro\nApple Silicon" <<device>> as MAC {
+  node "Python 3.13 (uv)" <<executionEnvironment>> {
+    artifact "labeler" as A_LBL
+    artifact "train / eval\nPyTorch MPS" as A_TRAIN
+  }
+}
+node "Phone" <<device>> as PHONE
+cloud "APNs / FCM" <<external>> as PUSH
+
+'=========================== M3 (GATED) ===========================
+node "Drone — M3 gated" <<device>> as DRONE {
+  node "Companion computer" <<executionEnvironment>> {
+    artifact "MAVSDK sortie FSM" as A_SORTIE
+  }
+}
+node "ArduPilot SITL\n+ Gazebo" <<device>> as SITL
+
+'=========================== PATHS ===========================
+CAM     --> SW_YARD  : "PoE · RTSP"
+CAMW    --> SW_YARD  : "PoE · RTSP"
+SW_YARD --> SW_HOUSE : "CAT6 §5.2"
+SW_HOUSE --> BOX     : "Ethernet"
+
+C_FRIGATE --> SW_HOUSE : "RTSP pull"
+C_FRIGATE --> TPU      : "detect"
+C_FRIGATE --> C_MQTT   : "MQTT pub"
+C_FRIGATE --> MEDIA    : "write"
+
+C_CLS --> C_MQTT    : "MQTT"
+C_CLS --> C_FRIGATE : "HTTP snapshot"
+C_CLS --> TPU       : "infer"
+
+C_BRAIN --> C_MQTT : "MQTT"
+C_BRAIN --> DB     : "SQLite"
+
+C_EFF --> C_MQTT : "MQTT sub"
+C_EFF --> ESP    : "MQTT / API"
+C_EFF --> C_NTFY : "HTTP"
+ESP   --> ACT    : "GPIO"
+
+C_NTFY --> PUSH    : "HTTPS"
+PUSH   --> PHONE   : "push"
+PHONE  --> C_BRAIN : "HTTPS /sortie"
+
+MAC ..> BOX   : "SSH · rsync"
+MAC ..> C_CLS : "deploy .onnx"
+MAC ..> SITL  : "MAVLink"
+
+C_EFF ..> DRONE : "MAVLink (M3)"
+DRONE ..> PHONE : "FPV (M3)"
+
+@enduml
