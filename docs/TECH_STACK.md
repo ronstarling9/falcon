@@ -70,6 +70,33 @@ Avoid 3.15 until it has shipped and the wheels have caught up.
 | uv | current | ~ | Packaging and lockfile |
 | Ruff + mypy | current | ~ | Lint, types |
 
+## Development machine
+
+Apple MacBook Pro 14-inch, 2024 — Silver.
+
+| | |
+|---|---|
+| Chip | **Apple M4 Max** (binned) |
+| CPU | 14-core — 10 performance + 4 efficiency |
+| GPU | **32-core** |
+| Neural Engine | 16-core |
+| Unified memory | **36 GB** |
+| Memory bandwidth | **410 GB/s** (the 40-core M4 Max is 546 GB/s) |
+| Storage | 1 TB SSD |
+| Display | 14.2-inch Liquid Retina XDR |
+
+Three numbers drive decisions elsewhere:
+
+- **36 GB** sets the local VLM ceiling. Qwen3-VL-30B-A3B (4-bit) fits but sits
+  at the top of it — see PLAN.md §10.4 for the wired-memory setting and why
+  the VLM and a training run must not overlap.
+- **410 GB/s**, not 546. Token generation is bandwidth-bound, so expect ~50
+  tok/s rather than the ~68 tok/s commonly quoted for "M4 Max." Irrelevant for
+  batch work, which is all this project asks of it.
+- **1 TB** is ample for datasets (~5 GB at 50k crops) and must not become the
+  footage archive. Clips live on the always-on box, which needs its own
+  sizing — PLAN.md §13.
+
 ## MacBook — training and labeling only
 
 | Component | Version | Verified | Notes |

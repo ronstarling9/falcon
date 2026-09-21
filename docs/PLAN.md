@@ -254,7 +254,8 @@ data flowing, validate that the models separate squirrel from chipmunk on
 
 ## 6. Compute topology — the Mac is not the server
 
-The available GPU is a MacBook Pro (36-core Apple Silicon GPU). That is a lot
+The available GPU is a 2024 MacBook Pro, M4 Max, 32-core GPU with 36 GB
+unified memory (full specs in [TECH_STACK.md](TECH_STACK.md)). That is a lot
 of compute, but it is the wrong shape for half of this system, and the
 mismatch is worth stating plainly because it invalidates "run the whole stack
 in Compose on the GPU box."
@@ -596,16 +597,29 @@ MLX is the Apple-native runtime and currently the fastest way to run these on
 Apple Silicon; **mlx-vlm** is the vision-model wrapper. Ollama is the
 lower-friction alternative.
 
-RAM, not GPU cores, is the binding constraint:
+**36 GB unified memory resolves the choice, and it lands right at the
+boundary.** Qwen3-VL-30B-A3B (4-bit MLX) wants ≥32 GB: ~15–17 GB of weights
+plus the vision encoder, KV cache and image tokens puts the working set near
+20 GB, against 36 GB total with macOS taking 4–8 GB. **It fits — but it is the
+top of what this machine holds, not a comfortable fit.** Two consequences:
 
-| Unified memory | Model | Notes |
-|---|---|---|
-| 48 GB+ | **Qwen3-VL-30B-A3B** (4-bit MLX) | The pick. MoE — 30B total but ~3B active, so ~68 tok/s on an M4 Max despite its size. Needs ≥32 GB |
-| 24–32 GB | Qwen3-VL 8B class | Comfortable, noticeably weaker on fine detail |
-| 8–16 GB | Gemma 4 E4B | Best of the tiny multimodal models |
+- macOS caps GPU-wired memory at roughly 75% of RAM (~27 GB here). If
+  allocation fails, raise it: `sudo sysctl iogpu.wired_limit_mb=30720`.
+- **Don't run the VLM and a fine-tune concurrently** — serialize them. Both
+  want the same pool.
+- Fall back to a Qwen3-VL 8B-class model if it thrashes.
 
-All of these are batch jobs on a machine that is already the training box —
-they cost nothing per run and no footage leaves the house.
+**Throughput: expect ~50 tok/s, not the ~68 tok/s usually quoted for "M4
+Max."** Token generation is memory-bandwidth-bound and the 32-core M4 Max is
+the binned part at **410 GB/s**, against 546 GB/s on the 40-core version.
+Since every LLM role here is batch and offline (§10.1), this is a throughput
+number, not a responsiveness one — it doesn't matter much.
+
+Fine-tuning the species classifier is untroubled by any of this: EfficientNet-B0
+and YOLO11-s are small, and 36 GB of unified memory allows generous batch sizes.
+
+**The Neural Engine is not the path.** MLX targets the GPU; the 16-core ANE is
+only reachable through CoreML. Not worth chasing for batch work.
 
 ### 10.5 If you'd rather not run it locally
 
@@ -704,6 +718,14 @@ falcon/
   — unless there is already power at a rear garage/shed, in which case the
   existing backyard WiFi is adequate and this line drops out.
 - An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
+- **Storage on that box — size it deliberately.** Three 4 MP H.265 cameras at
+  ~4 Mbps are ~1.8 GB/hour each. Continuous daylight recording in June
+  (14 h) is **~75 GB/day → ~2.3 TB at 30-day retention**; recording only
+  motion segments (~3 h/day across three cameras) is ~16 GB/day → ~480 GB.
+  Budget a 2 TB drive, or set Frigate's retention explicitly and record
+  segments rather than continuously. **Clips stay on the box; only crops go to
+  the Mac** — a 50k-crop dataset is ~5 GB, but footage would eat the 1 TB SSD
+  in weeks.
 - No IR illuminators — daylight only (§8).
 - The MacBook, for training only. No spend.
 - Total: roughly $320–650, and none of it needed to start (§6).
