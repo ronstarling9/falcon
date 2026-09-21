@@ -25,6 +25,10 @@ Go or TypeScript without touching the MQTT contract.)*
    a Pi 5 rather than a mini PC. Check before choosing a Python minor.
 4. **Models are artifacts, not dependencies.** `species-clf.onnx` is versioned
    and shipped with the eval metrics it achieved (§9.5), not rebuilt in place.
+5. **Fine-tune SpeciesNet, don't replace it.** If step 4 of PLAN.md §8.3 is
+   reached, fine-tuning SpeciesNet's head beats training a local model from
+   scratch — the 2026 literature is clear on this, and you keep the global
+   feature representations learned from 65M images.
 
 ## Always-on box
 
@@ -53,8 +57,8 @@ Avoid 3.15 until it has shipped and the wheels have caught up.
 |---|---|---|---|
 | **MegaDetector** | **v6** | ✓ | Stage 1 (animal/person/vehicle). MDv6-c = YOLOv9-compact; YOLOv11 and RT-DETR variants also released. Microsoft now recommends v6 as default |
 | PytorchWildlife | 1.1.x+ | ~ | The package that serves MegaDetector |
-| SpeciesNet | current | ~ | Stage 2 bootstrap labels; covers NA rodents |
-| **Ultralytics** | **8.4.55** | ✓ | For fine-tuning. YOLO26 (Jan 2026) is current SOTA — lighter head, native end-to-end inference, ~43% faster CPU ONNX than YOLO11n |
+| **SpeciesNet** | current | ✓ | Stage 2. EfficientNetV2-M, 2,498 classes, 65M training images, geofencing by coordinates. **May be sufficient unfine-tuned** — see PLAN.md §8.3 before assuming otherwise |
+| **Ultralytics** | **8.4.55** | ✓ | Open-vocab auto-labeling (YOLO-World) and any custom detector work. YOLO26 (Jan 2026) is current SOTA — lighter head, native end-to-end inference, ~43% faster CPU ONNX than YOLO11n |
 | ONNX Runtime | 1.2x | ~ | Inference on the box. Note: recent versions dropped NVIDIA GTX 900 support — irrelevant on Coral/Hailo, relevant if you ever add a GPU |
 | Coral PyCoral / Hailo runtime | current | ~ | Whichever accelerator you buy (§6) |
 

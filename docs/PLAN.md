@@ -338,23 +338,100 @@ per-component detail in **[COMPONENTS.md](COMPONENTS.md)**; pinned versions in
 
 ## 8. The detection pipeline
 
-Stage 1 — **is there an animal.** MegaDetector (Pytorch-Wildlife) is built for
-exactly this: camera-trap imagery, three classes (animal / person / vehicle),
-very high recall in bad light and partial occlusion. Far more robust here than
-a COCO detector.
+### 8.1 What each model can actually do out of the box
 
-Stage 2 — **which animal.** Two options, use both in sequence over time:
-- *Bootstrap:* SpeciesNet, which covers North American rodents, gets you
-  useful labels on day one with zero training.
-- *Converge:* fine-tune a small classifier (EfficientNet-B0 or YOLO11-s) on
-  crops from your own cameras. A fixed camera is an enormous advantage — the
-  background is constant, so 2–3k verified crops gets high accuracy quickly.
+| Model | Classes | What it gives you here |
+|---|---|---|
+| COCO detectors (Frigate default) | 80 | **Nothing.** No squirrel, chipmunk or groundhog class exists. A squirrel is forced into `cat`, sometimes `bird`. This is a *vocabulary* problem, not a confidence problem — no threshold creates a class that isn't there. |
+| **MegaDetector v6** | 3 (animal/person/vehicle) | Reliably finds the animal — ~99.4% at "is something there" — and tells you nothing about which. By design: it's a blank-frame filter for camera-trap researchers. |
+| **SpeciesNet** | **2,498** | **This one can.** EfficientNetV2-M trained on 65M labelled camera-trap images, covers North American rodents, and geofences predictions to species that actually occur at your coordinates. |
 
-Stage 3 — **labeling flywheel.** Every event stores its crop. Auto-label with
-an open-vocabulary detector (YOLO-World or OWLv2, prompted with
+So the honest answer to "can it work out of the box" is **plausibly yes**, via
+SpeciesNet. Fine-tuning is not a given.
+
+### 8.2 So why might you still need to fine-tune? Domain shift
+
+SpeciesNet is trained on *camera-trap* imagery: ground-level, motion-triggered,
+animal usually large in frame, often IR-lit. Yours is a security camera 10–12 ft
+up, tilted ~20° down, in daylight, with the animal 25–40 ft away at 50–100 px
+(§5). Different angle, scale, optics and colour science.
+
+The camera-trap literature puts accuracy loss under domain shift at
+**9% to 60%.** That range is the whole question. You might land at the good
+end and never need to train anything; you might land at the bad end. **You
+cannot know without measuring, and measuring is cheap.**
+
+### 8.3 Escalation ladder — stop as soon as it's good enough
+
+Each step costs more than the one above it. Most projects stop at 3.
+
+1. **SpeciesNet as-is, geofenced** to your lat/long. Free. Measure.
+2. **Restrict the label space** to your ~8 local species by masking logits.
+   Not fine-tuning. Large accuracy win for almost no work — a model choosing
+   among 2,498 classes will occasionally pick a plausible-but-absurd Eurasian
+   rodent.
+3. **Recalibrate per-class thresholds** for the asymmetric loss in §9.5. Not
+   fine-tuning either, and it targets the metric that actually governs safety
+   rather than average accuracy.
+4. **Fine-tune SpeciesNet's head** on your own crops. ← only now
+5. Fine-tune deeper, or train a custom detector. Rarely needed.
+
+**If you reach step 4, fine-tune SpeciesNet — don't train your own model.**
+The 2026 literature finds fine-tuned SpeciesNet outperforms locally-trained
+models, because you keep global feature representations and add only local
+taxonomic specialisation. There is a close precedent: AHDriFT-ID fine-tuned
+SpeciesNet to 46 categories for *downward-facing small-animal cameras* in
+Ohio — similar geometry, similar animals, similar region.
+
+### 8.4 What fine-tuning actually is, mechanically
+
+You are not retraining a network. The backbone already knows edges, fur
+texture and animal morphology from 65M images; you keep all of that and
+retrain only the final classification layer(s) to map those features onto
+*your* label set and *your* imaging conditions. That's why thousands of
+examples suffice rather than millions.
+
+The loop:
+
+1. **Collect** — automatic. M1 stores every crop, so the training set accrues
+   as a side effect of running the system.
+2. **Auto-label** — SpeciesNet plus an open-vocabulary detector propose labels;
+   you are never labelling from scratch.
+3. **Verify** — confirm/correct in the labeler. The only expensive step, and
+   it's an evening or three.
+4. **Dedup** — by embedding (§10.3). 3,000 near-identical crops are not 3,000
+   examples.
+5. **Split** — see the traps below.
+6. **Train the head** — minutes to an hour on the M4 Max.
+7. **Evaluate** — on `P(predicted ∈ TARGETS | actual = cat)` (§9.5), not
+   accuracy.
+8. **Export** — ONNX, int8, deploy to the box.
+9. **Iterate** — new failures become new training data.
+
+### 8.5 Two traps
+
+**Split by time, not at random.** A single squirrel visit yields ~50
+near-identical frames. A random split scatters them across train and test, the
+model effectively sees its test set during training, and your reported accuracy
+is fiction. Split by day or by week.
+
+**Crop tightly to the detection box — and note this qualifies something said
+earlier.** A fixed camera's constant background is a data-efficiency advantage,
+*and* an overfitting hazard: the model can learn "brown blob on that fence post
+= squirrel" instead of what a squirrel looks like, score beautifully on your
+test set, and fail the first time one appears somewhere new. The literature's
+remedy is exactly this — crop to the MegaDetector box so the model sees the
+animal rather than the habitat. Cropping is what converts the fixed background
+from a liability into an advantage.
+
+### 8.6 Labeling flywheel
+
+Every event stores its crop. Auto-label with an open-vocabulary detector
+(YOLO-World or OWLv2, prompted with
 `["squirrel","chipmunk","groundhog","rabbit","deer","cat","dog","bird","human"]`),
-then human-verify in a minimal web UI. Verifying a few hundred crops is one
-evening. This is what makes the system yours rather than generic.
+then human-verify. Verifying a few hundred crops is one evening. This is what
+makes the system yours rather than generic — and per §8.3, you should only
+reach for it once measurement says steps 1–3 weren't enough.
 
 ### Detection window — daylight only
 
@@ -778,7 +855,8 @@ engines arguing over the same files.
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
 stored with crop + clip, push notification with snapshot, labeler UI, first
-fine-tune, and staged capture sessions for the protected classes (§9.6).
+a measured decision on whether fine-tuning is even needed (§8.3), and staged
+capture sessions for the protected classes (§9.6).
 **No actuators at all.** Bootstrap the dataset offline from the existing Nest
 Cam (§14.1) before buying anything.
 

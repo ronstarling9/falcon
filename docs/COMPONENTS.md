@@ -136,8 +136,8 @@ classified, decided, or notified. Highest-leverage thing to health-check.
 **full-resolution** snapshot from Frigate's HTTP API (the detect sub-stream has
 too few px/ft for species ID, §5), runs MegaDetector v6 for presence, then the
 species model, and publishes a classified detection.
-**Built on** — Python, PytorchWildlife / MegaDetector v6, a fine-tuned
-EfficientNet-B0 or YOLO11-s exported to ONNX, ONNX Runtime.
+**Built on** — Python, PytorchWildlife / MegaDetector v6, SpeciesNet
+(unfine-tuned at first — PLAN.md §8.3), ONNX Runtime.
 **Consumes** — `frigate/events`, Frigate HTTP. **Produces** —
 `falcon/detections`.
 **Why a sidecar, not a Frigate plugin** — Frigate 0.17 added native object
