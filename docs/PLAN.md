@@ -297,7 +297,7 @@ on MPS; the SpeciesNet bootstrap pass is offline, so CPU fallback is fine if
 its ops don't map cleanly.
 
 **Zero-spend start.** Develop the entire pipeline natively on the Mac right
-now against clips from the Nest Cam already on hand (§13.1) or any video file — no Docker, no hardware. Buy the
+now against clips from the Nest Cam already on hand (§14.1) or any video file — no Docker, no hardware. Buy the
 always-on box only when you're ready to run continuously. That defers all
 spend past the point where you know the pipeline works.
 
@@ -311,7 +311,9 @@ spend past the point where you know the pipeline works.
                zones, NVR,        SpeciesNet    escalation, ├─ audio
                snapshots)         / our own)    audit log)  └─ drone (tap-to-launch)
                                        │            │
-                                       └──► event store (SQLite + clips on disk)
+                                       └──► event store (SQLite + media on disk)
+                                                    ▲
+                                              janitor (§11 tiers)
                                                     │
                                               labeler UI → training set → fine-tune
 ```
@@ -386,25 +388,53 @@ the drone lands:
 ```json
 {
   "event_id": "uuid",
-  "ts": "2026-09-20T14:22:11.482Z",
+  "track_id": "t-9931",
   "camera": "bed_north",
-  "zone": ["tomatoes"],
+  "first_seen": "2026-09-20T14:22:11.482Z",
+  "last_seen":  "2026-09-20T14:22:15.704Z",
+  "dwell_s": 4.2,
+
   "species": "squirrel",
   "confidence": 0.91,
-  "bbox": [0.31, 0.44, 0.09, 0.14],
-  "world": { "bearing_deg": 118.0, "range_m": 6.2 },
-  "track_id": "t-9931",
+  "scores":    { "squirrel": 0.91, "chipmunk": 0.05, "rabbit": 0.02 },
   "protected": { "person": 0.00, "dog": 0.01, "cat": 0.11, "bird": 0.03 },
-  "decision": { "engage": false, "reason": "veto:cat" },
-  "dwell_s": 4.2,
-  "snapshot_uri": "file:///var/falcon/snap/…jpg",
-  "clip_uri": "file:///var/falcon/clip/…mp4"
+
+  "models": {
+    "stage1": "megadetector-v6c@sha256:1f3a…",
+    "stage2": "species-clf@v4:sha256:9b02…"
+  },
+
+  "zones": [{ "name": "tomatoes", "enter": 1.10, "exit": 3.90 }],
+  "track": [[0.31,0.44,0.09,0.14], [0.33,0.44,0.09,0.14], "…50 points @5Hz"],
+  "world": { "bearing_deg": 118.0, "range_m": 6.2 },
+
+  "context": { "sun_elev_deg": 31.2, "sun_az_deg": 244.0, "solar_phase": "pm" },
+
+  "decision": {
+    "engage": false,
+    "reason": "veto:cat",
+    "rule": "protected_veto",
+    "thresholds": { "engage": 0.80, "cat": 0.05 }
+  },
+  "effector": null,
+
+  "media": {
+    "crop_uri":    "file:///var/falcon/crop/…jpg",
+    "sheet_uri":   "file:///var/falcon/sheet/…jpg",
+    "snapshot_uri":"file:///var/falcon/snap/…jpg",
+    "clip_uri":    "file:///var/falcon/clip/…mp4",
+    "clip_expires":"2026-09-27T14:22:11Z"
+  },
+  "retention": { "tier": "standard", "pinned": false, "pin_reason": null }
 }
 ```
 
-`world` is populated by a per-camera homography (one calibration per camera,
-ground-plane assumption). It is unused in M1 and essential the moment an
-effector needs to aim.
+`track` is the field that earns the short clip retention (§11.4): the full
+bbox path at detection rate is ~1 KB and reconstructs speed, entry edge, and
+approach vector without any video. `models` records provenance so a later
+re-analysis knows which model version produced which label. `world` is
+populated by a per-camera homography (one calibration per camera, ground-plane
+assumption) — unused in M1, essential the moment an effector needs to aim.
 
 ## 9. Engagement policy — the never-target list drives the design
 
@@ -641,14 +671,115 @@ capture sessions (§9.6) mean deliberately recording your family. That is the
 consideration worth weighing, and it is a genuine one — the dollars are noise
 either way.
 
-## 11. Milestones
+## 11. Data retention
+
+Optimized for: **short video life, permanent detailed records.**
+
+### 11.1 The key ratio
+
+A 30 s clip of a squirrel at 4 MP is ~15 MB. The 224×224 crop cut out of it is
+~20 KB. For *training* purposes those contain nearly the same information —
+the clip is ~750× larger and adds only motion context and human-reviewable
+behavior.
+
+So the design principle is: **keep the crop and the record forever; keep the
+clip only as long as you're actively reviewing it.**
+
+### 11.2 Never record continuously
+
+Continuous recording is ~75 GB/day (§13) for no benefit — nothing happens in
+99% of those frames. Record detection segments only. In Frigate that means
+setting continuous retention to 0–1 days and relying on event-based retention
+(`record.alerts.retain.days` / `record.detections.retain.days`;
+verify the key names against 0.18, config changed across 0.17).
+
+### 11.3 Tiers
+
+Assuming ~200 detection events/day across three cameras in the daylight window:
+
+| Tier | Size/event | Retention | Steady state |
+|---|---|---|---|
+| **Event record** (SQLite row + trajectory) | ~3 KB | **forever** | 219 MB/yr |
+| **Crop** (224², best + 1 alt) | ~40 KB | **forever**, deduped (§10.3) | 2.9 GB/yr |
+| **Contact sheet** (9 sampled frames, one montage JPEG) | ~150 KB | **1 year** | 11 GB |
+| **Full-res snapshot** | ~800 KB | **30 days** | 4.8 GB |
+| **Clip** (30 s H.265) | ~15 MB | **7 days** | 21 GB |
+| **NDJSON daily export** (gzipped) | — | **forever** | 55 MB/yr |
+
+**Total steady state: ~40 GB**, against ~2.3 TB for naive continuous recording
+at 30-day retention. Roughly a 60× reduction, and it changes what you need to
+buy (§13).
+
+**The contact sheet is the trick.** Nine frames sampled across the event,
+tiled into one JPEG, is 1% of the clip's size and preserves the behavioral
+sequence — approach, pause, flee. It answers "what actually happened" for
+almost every event you'd otherwise pull the video for.
+
+### 11.4 What makes the record detailed enough to replace video
+
+This is the part that earns the short clip retention. Each event row carries:
+
+- **Identity** — `event_id`, `track_id`, camera, `first_seen`, `last_seen`,
+  `dwell_s`
+- **Full classification** — not just top-1: every class score, plus every
+  protected-class score (§9.4)
+- **Model provenance** — the version/hash of each model that produced the
+  labels, so a later re-analysis knows what labeled what
+- **Trajectory** — the *whole* bbox track at detection rate, not one box. 50
+  points × 4 floats ≈ 1 KB, and it reconstructs path, speed, entry edge, and
+  approach vector. This is what substitutes for watching the clip.
+- **Zones** — entered/exited with timestamps; dwell per zone
+- **World frame** — `bearing_deg`, `range_m` from the camera homography (§7)
+- **Decision** — engage/no-engage, the reason, which rule fired, and the
+  threshold values in effect at the time
+- **Effector outcome** — what fired, when, for how long
+- **Context** — sun elevation and azimuth, position in the solar window;
+  optionally temperature and precipitation, which strongly predict activity
+
+**Two log streams, don't conflate them.** Event records are structured,
+permanent, and queryable. *Application* logs (service stdout) are transient —
+rotate at 7 days / 100 MB and let them go.
+
+For grep-ability alongside SQL, write a **daily NDJSON export, gzipped**. 200
+events × 3 KB compresses to ~150 KB/day — 55 MB/year, keep it forever. You get
+`zgrep` over the full history and `falcon.db` for real queries, from one
+source of truth.
+
+### 11.5 Pinning — retention's exceptions
+
+Some events must ignore the tiers. **Pinned events never auto-delete** (clip
+retained 90 days, everything else forever):
+
+1. **Anything the policy acted on** — an effector fired, or shadow mode said it
+   would have (§9.7). This is the audit record; if the system ever soaks
+   something it shouldn't, this is the evidence.
+2. **Any protected-class detection near a decision** (§9.1) — same reason.
+3. **Stage disagreements** — MegaDetector vs. species model, or the VLM
+   adjudicator vs. the classifier (§10.1). These are the training-valuable
+   events.
+4. **Manually flagged** in the labeler.
+
+Pins are rare — a handful a day — so they cost little.
+
+### 11.6 Don't fight Frigate's retention engine
+
+Frigate manages its own media lifecycle and will happily delete a clip the
+policy wanted pinned. So: give Frigate a **short, generous-enough** window
+(~10 days), and have `falcon-brain` **copy pinned media out of Frigate's
+managed storage** into `media/pinned/` on write.
+
+A `falcon-janitor` job then enforces §11.3 over Falcon's own directories only.
+Two systems, two storage areas, one owner each — rather than two retention
+engines arguing over the same files.
+
+## 12. Milestones
 
 ### M1 — Detect, notify, log  ← current
 Cameras mounted, Frigate ingesting, two-stage classifier running, every event
 stored with crop + clip, push notification with snapshot, labeler UI, first
 fine-tune, and staged capture sessions for the protected classes (§9.6).
 **No actuators at all.** Bootstrap the dataset offline from the existing Nest
-Cam (§13.1) before buying anything.
+Cam (§14.1) before buying anything.
 
 Deliverable that matters: a **critter clock** — which species, which beds,
 what time of day, how often. You cannot tune a deterrent you haven't measured,
@@ -689,7 +820,7 @@ Randomized approach vectors, variable delays, audio profile rotation.
 Measure raid frequency over 30-day windows against M1's baseline. This is the
 only way to know whether any of it worked.
 
-## 12. Repo layout (proposed)
+## 13. Repo layout (proposed)
 
 ```
 falcon/
@@ -709,30 +840,26 @@ falcon/
 └─ deploy/         compose.yaml, .env.example
 ```
 
-## 13. Hardware (M1 only)
+## 14. Hardware (M1 only)
 
 - 2–3 PoE cameras with RTSP and a usable sub-stream — see the shortlist in
-  §13.2. **Buy for lens, not megapixels** (§5), and start with one.
+  §14.2. **Buy for lens, not megapixels** (§5), and start with one.
 - PoE switch at the house, plus a small outdoor-rated PoE switch at the yard
   end, and one 60–90 ft direct-burial CAT6 run in conduit between them (§5.2)
   — unless there is already power at a rear garage/shed, in which case the
   existing backyard WiFi is adequate and this line drops out.
 - An always-on box (§6): used mini PC + Coral, or Pi 5 + AI HAT+. $120–250.
-- **Storage on that box — size it deliberately.** Three 4 MP H.265 cameras at
-  ~4 Mbps are ~1.8 GB/hour each. Continuous daylight recording in June
-  (14 h) is **~75 GB/day → ~2.3 TB at 30-day retention**; recording only
-  motion segments (~3 h/day across three cameras) is ~16 GB/day → ~480 GB.
-  Budget a 2 TB drive, or set Frigate's retention explicitly and record
-  segments rather than continuously. **Clips stay on the box; only crops go to
-  the Mac** — a 50k-crop dataset is ~5 GB, but footage would eat the 1 TB SSD
-  in weeks.
+- **Storage: a 500 GB SSD is plenty** under the retention policy in §11
+  (~40 GB steady state). Naive continuous recording would have needed ~2.3 TB
+  for the same period — the policy, not the disk, is what solves this. Clips
+  stay on the box; only crops go to the Mac.
 - No IR illuminators — daylight only (§8).
 - The MacBook, for training only. No spend.
 - Total: roughly $320–650, and none of it needed to start (§6).
 
 No drone spend until M3, and none at all until the software flies in SITL.
 
-### 13.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
+### 14.1 Equipment on hand: Nest Cam (indoor, wired, 2nd gen)
 
 **Not usable in the built system**, for two independent reasons.
 
@@ -781,7 +908,7 @@ Note: without a Nest Aware subscription, wired cameras retain roughly 3 hours
 of event history, so collect the same day or subscribe for a month while
 building the dataset.
 
-### 13.2 Camera shortlist
+### 14.2 Camera shortlist
 
 Three buying rules first, because they eliminate most of the catalog:
 
@@ -827,7 +954,7 @@ Prices and model availability drift; verify current listings before ordering.
 EmpireTech is the US-market Dahua channel, and how you get genuine Dahua
 firmware stateside.
 
-## 14. Open questions
+## 15. Open questions
 
 Site-specific ones are in §4.3. Still open and affecting the build: the time
 budget. Language and deploy choices are now recorded as defaults in
@@ -835,6 +962,6 @@ budget. Language and deploy choices are now recorded as defaults in
 box — rather than left open; easy to revisit, since the MQTT contract is the
 only thing they'd have to honor.
 
-Resolved: tap-to-launch posture (§3), ground-effector-first (§11), M1 scope
-(§11), daylight-only (§8), compute topology (§6),
+Resolved: tap-to-launch posture (§3), ground-effector-first (§12), M1 scope
+(§12), daylight-only (§8), compute topology (§6),
 never-target list (§9), backyard WiFi present (§5.2).

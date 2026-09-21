@@ -36,7 +36,8 @@ node "House LAN" <<site>> {
   node "Always-On Box\nmini PC or Pi 5 · Debian 13" <<device>> as BOX {
     node "Edge Accelerator\nCoral / Hailo-8L" <<device>> as TPU
     database "falcon.db\nSQLite WAL" as DB
-    folder "media/\nsnapshots · crops · clips" as MEDIA
+    folder "media/\ncrops · sheets · snaps · clips" as MEDIA
+    folder "media/pinned/\nnever auto-deleted" as PINNED
 
     node "Docker Engine + Compose v2" <<executionEnvironment>> as DOCKER {
       node "frigate" <<container>> as C_FRIGATE {
@@ -53,6 +54,9 @@ node "House LAN" <<site>> {
         artifact "FastAPI" as A_API
       }
       node "falcon-effectors" <<container>> as C_EFF
+      node "falcon-janitor" <<container>> as C_JAN {
+        artifact "retention tiers §11" as A_JAN
+      }
       node "ntfy" <<container>> as C_NTFY
     }
   }
@@ -93,6 +97,9 @@ C_CLS --> TPU       : "infer"
 
 C_BRAIN --> C_MQTT : "MQTT"
 C_BRAIN --> DB     : "SQLite"
+C_BRAIN --> PINNED : "copy on pin"
+C_JAN   --> MEDIA  : "expire tiers"
+C_JAN   --> DB     : "SQLite"
 
 C_EFF --> C_MQTT : "MQTT sub"
 C_EFF --> ESP    : "MQTT / API"

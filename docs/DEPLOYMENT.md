@@ -36,9 +36,11 @@ Jersey wildlife question in [PLAN.md §4.2](PLAN.md).
 | `falcon-classifier` | container | MegaDetector v6 → species model. Sidecar, not a Frigate plugin (see below). |
 | `falcon-brain` | container | Engagement policy (§9), audit log, HTTP API. |
 | `falcon-effectors` | container | notify / sprinkler / audio / drone behind one interface. |
+| `falcon-janitor` | container | Enforces the retention tiers (PLAN.md §11) over Falcon's own media directories. |
 | `ntfy` | container | Self-hosted push with action buttons. |
 | `falcon.db` | artifact | SQLite in WAL mode: events, decisions, audit trail. |
-| `media/` | artifact | Snapshots, crops, clips on disk. |
+| `media/` | artifact | Crops, contact sheets, snapshots, clips — tiered retention (PLAN.md §11.3). |
+| `media/pinned/` | artifact | Copied out of Frigate's managed storage on pin; never auto-deleted (§11.5–11.6). |
 
 ### Off-LAN
 
@@ -64,6 +66,8 @@ Jersey wildlife question in [PLAN.md §4.2](PLAN.md).
 | `falcon-classifier` | Edge accelerator | USB / PCIe | MegaDetector + species model |
 | `falcon-brain` | `mosquitto` | MQTT 1883 | sub `falcon/detections`, pub `falcon/actions` |
 | `falcon-brain` | `falcon.db` | SQLite | Events, decisions, audit |
+| `falcon-brain` | `media/pinned/` | file I/O | Copies pinned media out of Frigate's lifecycle (§11.6) |
+| `falcon-janitor` | `media/`, `falcon.db` | file I/O, SQLite | Expires tiers; skips pinned events |
 | `falcon-effectors` | `mosquitto` | MQTT 1883 | sub `falcon/actions` |
 | `falcon-effectors` | ESP32 | MQTT 1883 or ESPHome native API 6053 | Valve/servo commands |
 | ESP32 | Actuator | GPIO | Relay, servo PWM |
@@ -83,6 +87,13 @@ never touches NVR config; the classifier needs the *full-resolution* snapshot
 rather than the detect sub-stream Frigate's own pipeline runs on (§5); and
 swapping or A/B-ing models is a container restart. Revisit if Frigate's native
 path matures enough to carry the two-stage pipeline.
+
+**Retention is owned in one place.** Frigate manages its own media lifecycle
+and would happily delete a clip the policy wanted pinned. So Frigate gets a
+short window (~10 days), `falcon-brain` copies pinned media *out* of that
+storage on write, and `falcon-janitor` enforces the tiers over Falcon's
+directories only. Two storage areas, one owner each — rather than two
+retention engines arguing over the same files.
 
 **MQTT is the seam.** Every service meets on the broker, so effectors are
 genuinely pluggable — `DroneEffector` subscribes to the same `falcon/actions`

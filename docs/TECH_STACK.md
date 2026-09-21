@@ -69,6 +69,7 @@ Avoid 3.15 until it has shipped and the wheels have caught up.
 | HTMX | 2.x | ~ | Labeler UI; no JS build step |
 | uv | current | ~ | Packaging and lockfile |
 | Ruff + mypy | current | ~ | Lint, types |
+| APScheduler (or systemd timer) | current | ~ | `falcon-janitor` retention sweeps (PLAN.md §11) |
 
 ## Development machine
 
